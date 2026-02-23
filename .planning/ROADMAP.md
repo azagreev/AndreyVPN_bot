@@ -3,7 +3,7 @@
 ## Phases
 
 - [x] **Phase 1: Foundation & Data Layer** - Establish project structure and persistence.
-- [ ] **Phase 2: Bot Core & Access Control** - Implement onboarding, CAPTCHA, and admin approval.
+- [x] **Phase 2: Bot Core & Access Control** - Implement onboarding, CAPTCHA, and admin approval.
 - [ ] **Phase 3: VPN Service Integration** - Implement AmneziaWG profile generation logic.
 - [ ] **Phase 4: Profile Delivery Workflow** - Handle VPN requests and deliver QR/conf files.
 - [ ] **Phase 5: Monitoring & Status** - Implement traffic tracking and server health checks.
@@ -38,7 +38,7 @@
   1. Bot can generate unique private/public key pairs for AmneziaWG.
   2. Bot can generate a valid AmneziaWG peer configuration string.
   3. Peer configurations are successfully saved to the database.
-**Plans**: TBD
+**Plans**: [03-01-PLAN.md](phases/03-vpn-service-integration/03-01-PLAN.md) — VPN Infrastructure & Keys, [03-02-PLAN.md](phases/03-vpn-service-integration/03-02-PLAN.md) — IP Management & Config Generation
 
 ### Phase 4: Profile Delivery Workflow
 **Goal**: End-to-end VPN configuration request and delivery.
@@ -65,7 +65,7 @@
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Foundation & Data Layer | 2/2 | Completed | 2026-02-24 |
-| 2. Bot Core & Access Control | 0/1 | Not started | - |
+| 2. Bot Core & Access Control | 1/1 | Completed | 2026-02-24 |
 | 3. VPN Service Integration | 0/1 | Not started | - |
 | 4. Profile Delivery Workflow | 0/1 | Not started | - |
 | 5. Monitoring & Status | 0/1 | Not started | - |

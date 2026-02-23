@@ -8,6 +8,7 @@ from loguru import logger
 from bot.core.config import settings
 from bot.db.engine import init_db
 from bot.middlewares.db_middleware import DbMiddleware
+from bot.middlewares.access_middleware import AccessControlMiddleware
 from bot.handlers import setup_handlers
 
 
@@ -44,6 +45,7 @@ async def main():
     
     # Регистрация Middlewares
     dp.update.outer_middleware(DbMiddleware())
+    dp.update.outer_middleware(AccessControlMiddleware())
     
     # Регистрация Хендлеров
     dp.include_router(setup_handlers())
