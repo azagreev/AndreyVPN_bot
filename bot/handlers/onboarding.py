@@ -89,17 +89,17 @@ async def process_captcha(message: Message, db: aiosqlite.Connection, state: FSM
         "Мы сообщим вам, когда доступ будет одобрен."
     )
     
-    # Уведомление администратора (базовое, будет улучшено во 2-м задании)
-    try:
-        await bot.send_message(
-            settings.admin_id,
-            f"👤 Новый пользователь ожидает одобрения:
-"
-            f"ID: {message.from_user.id}
-"
-            f"Имя: {message.from_user.full_name}
-"
-            f"Username: @{message.from_user.username or 'отсутствует'}"
-        )
-    except Exception as e:
-        print(f"Ошибка при уведомлении администратора: {e}")
+        # Уведомление администратора
+        from bot.handlers.admin import get_admin_keyboard
+        try:
+            await bot.send_message(
+                settings.admin_id,
+                f"👤 Новый пользователь ожидает одобрения:\n\n"
+                f"ID: {message.from_user.id}\n"
+                f"Имя: {message.from_user.full_name}\n"
+                f"Username: @{message.from_user.username or 'отсутствует'}",
+                reply_markup=get_admin_keyboard(message.from_user.id)
+            )
+        except Exception as e:
+            print(f"Ошибка при уведомлении администратора: {e}")
+    

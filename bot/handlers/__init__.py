@@ -1,5 +1,6 @@
 from aiogram import Router
 from bot.handlers.onboarding import router as onboarding_router
+from bot.handlers.admin import router as admin_router
 
 def setup_handlers() -> Router:
     """
@@ -9,5 +10,6 @@ def setup_handlers() -> Router:
     
     # Подключение роутеров
     main_router.include_router(onboarding_router)
+    main_router.include_router(admin_router)
     
     return main_router
