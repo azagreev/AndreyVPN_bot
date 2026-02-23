@@ -28,7 +28,7 @@
   1. New users are blocked by a CAPTCHA challenge upon `/start`.
   2. Admin receives a Telegram notification with "Approve/Reject" buttons for new users.
   3. Only "Approved" users can access the main menu; others receive an "Access Denied" message.
-**Plans**: TBD
+**Plans**: [02-01-PLAN.md](phases/02-bot-core-access-control/02-01-PLAN.md) — Onboarding, CAPTCHA & Access Control
 
 ### Phase 3: VPN Service Integration
 **Goal**: Programmatic management of AmneziaWG peers.
