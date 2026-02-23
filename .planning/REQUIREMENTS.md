@@ -24,6 +24,23 @@
 
 ---
 
+## Traceability
+
+| Requirement | Phase | Status |
+|-------------|-------|--------|
+| AUTH-01 | Phase 2 | Pending |
+| AUTH-02 | Phase 2 | Pending |
+| AUTH-03 | Phase 2 | Pending |
+| VPN-01 | Phase 3 | Pending |
+| VPN-02 | Phase 4 | Pending |
+| VPN-03 | Phase 4 | Pending |
+| MONITOR-01 | Phase 5 | Pending |
+| MONITOR-02 | Phase 5 | Pending |
+| MONITOR-03 | Phase 5 | Pending |
+| DATA-01 | Phase 1 | Pending |
+
+---
+
 ## v2 / Deferred
 
 - [ ] **INST-01**: Автоматическая установка AmneziaWG в Docker через скрипт (отложено по просьбе пользователя).
@@ -35,4 +52,4 @@
 - **Multi-server support**: Работа с несколькими VPN-узлами — [фокус на одном сервере].
 
 ---
-*Last updated: 2026-02-24 after defining v1 requirements*
+*Last updated: 2026-02-24 after roadmap mapping*
