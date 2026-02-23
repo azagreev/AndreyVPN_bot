@@ -39,9 +39,23 @@ CREATE TABLE IF NOT EXISTS configs (
 );
 """
 
+CREATE_PROFILES_TABLE = """
+CREATE TABLE IF NOT EXISTS vpn_profiles (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER,
+    name TEXT,
+    private_key TEXT,
+    public_key TEXT,
+    ipv4_address TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users (telegram_id)
+);
+"""
+
 ALL_TABLES = [
     CREATE_USERS_TABLE,
     CREATE_APPROVALS_TABLE,
     CREATE_DAILY_STATS_TABLE,
-    CREATE_CONFIGS_TABLE
+    CREATE_CONFIGS_TABLE,
+    CREATE_PROFILES_TABLE
 ]
