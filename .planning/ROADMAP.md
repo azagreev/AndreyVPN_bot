@@ -2,7 +2,7 @@
 
 ## Phases
 
-- [ ] **Phase 1: Foundation & Data Layer** - Establish project structure and persistence.
+- [x] **Phase 1: Foundation & Data Layer** - Establish project structure and persistence.
 - [ ] **Phase 2: Bot Core & Access Control** - Implement onboarding, CAPTCHA, and admin approval.
 - [ ] **Phase 3: VPN Service Integration** - Implement AmneziaWG profile generation logic.
 - [ ] **Phase 4: Profile Delivery Workflow** - Handle VPN requests and deliver QR/conf files.
@@ -18,7 +18,7 @@
   1. Database file `bot_data.db` is created automatically on first run.
   2. All required tables (users, configs, stats) are present in the schema.
   3. Bot starts and logs "Database initialized" successfully.
-**Plans**: TBD
+**Plans**: [01-01-PLAN.md](phases/01-foundation-data-layer/01-01-PLAN.md), [01-02-PLAN.md](phases/01-foundation-data-layer/01-02-PLAN.md)
 
 ### Phase 2: Bot Core & Access Control
 **Goal**: Secure onboarding process with admin oversight.
@@ -64,7 +64,7 @@
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Foundation & Data Layer | 0/1 | Not started | - |
+| 1. Foundation & Data Layer | 2/2 | Completed | 2026-02-24 |
 | 2. Bot Core & Access Control | 0/1 | Not started | - |
 | 3. VPN Service Integration | 0/1 | Not started | - |
 | 4. Profile Delivery Workflow | 0/1 | Not started | - |
