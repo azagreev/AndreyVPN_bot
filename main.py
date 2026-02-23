@@ -8,6 +8,7 @@ from loguru import logger
 from bot.core.config import settings
 from bot.db.engine import init_db
 from bot.middlewares.db_middleware import DbMiddleware
+from bot.handlers import setup_handlers
 
 
 async def main():
@@ -43,6 +44,9 @@ async def main():
     
     # Регистрация Middlewares
     dp.update.outer_middleware(DbMiddleware())
+    
+    # Регистрация Хендлеров
+    dp.include_router(setup_handlers())
     
     # Запуск polling
     logger.info("Бот запущен и готов к работе.")
