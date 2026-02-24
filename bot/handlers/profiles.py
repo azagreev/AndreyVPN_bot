@@ -1,10 +1,17 @@
-from aiogram import Router, F, Bot
+from aiogram import Bot, F, Router
 from aiogram.filters import Command
-from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, BufferedInputFile
 from aiogram.filters.callback_data import CallbackData
+from aiogram.types import (
+    BufferedInputFile,
+    CallbackQuery,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Message,
+)
+from loguru import logger
+
 from bot.core.config import settings
 from bot.services.vpn_service import VPNService
-from loguru import logger
 
 router = Router()
 
@@ -28,7 +35,7 @@ def get_admin_vpn_keyboard(user_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 @router.message(Command("menu"))
-async def cmd_menu(message: Message):
+async def cmd_menu(message: Message) -> None:
     """
     Главное меню для одобренных пользователей.
     """
@@ -39,7 +46,7 @@ async def cmd_menu(message: Message):
     )
 
 @router.callback_query(ProfileRequestCallback.filter(F.action == "request"))
-async def handle_vpn_request(callback_query: CallbackQuery, bot: Bot):
+async def handle_vpn_request(callback_query: CallbackQuery, bot: Bot) -> None:
     """
     Пользователь нажимает кнопку "Запросить VPN".
     """
@@ -64,7 +71,7 @@ async def handle_vpn_request(callback_query: CallbackQuery, bot: Bot):
         logger.error(f"Не удалось уведомить админа о запросе VPN: {e}")
 
 @router.callback_query(ProfileRequestCallback.filter(F.action == "approve"))
-async def handle_vpn_approve(callback_query: CallbackQuery, callback_data: ProfileRequestCallback, bot: Bot):
+async def handle_vpn_approve(callback_query: CallbackQuery, callback_data: ProfileRequestCallback, bot: Bot) -> None:
     """
     Админ одобряет выдачу конфига.
     """
@@ -107,10 +114,10 @@ async def handle_vpn_approve(callback_query: CallbackQuery, callback_data: Profi
         
     except Exception as e:
         logger.exception(f"Ошибка при выдаче конфига: {e}")
-        await callback_query.message.answer(f"❌ Произошла ошибка при создании профиля: {e}")
+        await callback_query.message.answer("❌ Произошла ошибка при создании профиля. Обратитесь к администратору.")
 
 @router.callback_query(ProfileRequestCallback.filter(F.action == "reject"))
-async def handle_vpn_reject(callback_query: CallbackQuery, callback_data: ProfileRequestCallback, bot: Bot):
+async def handle_vpn_reject(callback_query: CallbackQuery, callback_data: ProfileRequestCallback, bot: Bot) -> None:
     """
     Админ отклоняет выдачу конфига.
     """

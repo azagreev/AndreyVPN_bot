@@ -1,10 +1,13 @@
 import random
-from aiogram import Router, Bot
+
+import aiosqlite
+from aiogram import Bot, Router
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import Message
-import aiosqlite
+from loguru import logger
+
 from bot.core.config import settings
 
 router = Router()
@@ -13,7 +16,7 @@ class CaptchaStates(StatesGroup):
     waiting_for_answer = State()
 
 @router.message(Command("start"))
-async def cmd_start(message: Message, db: aiosqlite.Connection, state: FSMContext):
+async def cmd_start(message: Message, db: aiosqlite.Connection, state: FSMContext) -> None:
     """
     Обработка команды /start. Если пользователь новый — выдает капчу.
     Если уже зарегистрирован — сообщает статус.
@@ -50,7 +53,7 @@ async def cmd_start(message: Message, db: aiosqlite.Connection, state: FSMContex
     )
 
 @router.message(CaptchaStates.waiting_for_answer)
-async def process_captcha(message: Message, db: aiosqlite.Connection, state: FSMContext, bot: Bot):
+async def process_captcha(message: Message, db: aiosqlite.Connection, state: FSMContext, bot: Bot) -> None:
     """
     Проверка ответа на капчу. При успехе регистрирует пользователя и уведомляет админа.
     """
@@ -101,5 +104,5 @@ async def process_captcha(message: Message, db: aiosqlite.Connection, state: FSM
             reply_markup=get_admin_keyboard(message.from_user.id)
         )
     except Exception as e:
-        print(f"Ошибка при уведомлении администратора: {e}")
+        logger.error(f"Ошибка при уведомлении администратора: {e}")
     

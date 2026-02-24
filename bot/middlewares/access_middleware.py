@@ -1,8 +1,11 @@
 from typing import Any, Awaitable, Callable, Dict
-from aiogram import BaseMiddleware, types
-from aiogram.types import Message, CallbackQuery
-from bot.core.config import settings
+
 import aiosqlite
+from aiogram import BaseMiddleware, types
+from aiogram.types import CallbackQuery, Message
+from loguru import logger
+
+from bot.core.config import settings
 
 class AccessControlMiddleware(BaseMiddleware):
     async def __call__(
@@ -33,10 +36,14 @@ class AccessControlMiddleware(BaseMiddleware):
                 return await handler(event, data)
 
         # Проверяем одобрение в базе данных
-        db: aiosqlite.Connection = data.get("db")
-        if not db:
-             # На случай, если DbMiddleware еще не отработал
-             return await handler(event, data)
+        db: aiosqlite.Connection | None = data.get("db")
+        if db is None:
+            logger.error("AccessControlMiddleware: db is None — blocking request (DbMiddleware may not have run)")
+            if isinstance(event, Message):
+                await event.answer("Internal error. Please try again later.")
+            elif isinstance(event, CallbackQuery):
+                await event.answer("Internal error.", show_alert=True)
+            return
 
         cursor = await db.execute("SELECT is_approved FROM users WHERE telegram_id = ?", (user_id,))
         row = await cursor.fetchone()

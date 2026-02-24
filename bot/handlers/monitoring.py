@@ -1,14 +1,15 @@
+import aiosqlite
 from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message
-import aiosqlite
-from bot.services.vpn_service import VPNService
+
 from bot.core.config import settings
+from bot.services.vpn_service import VPNService
 
 router = Router()
 
 @router.message(Command("stats"))
-async def cmd_stats(message: Message, db: aiosqlite.Connection):
+async def cmd_stats(message: Message, db: aiosqlite.Connection) -> None:
     """
     Показывает пользователю его статистику потребления трафика за текущий месяц.
     """
@@ -43,7 +44,7 @@ async def cmd_stats(message: Message, db: aiosqlite.Connection):
     await message.answer(response)
 
 @router.message(Command("server"))
-async def cmd_server_status(message: Message):
+async def cmd_server_status(message: Message) -> None:
     """
     Показывает администратору статус VPN-сервера.
     """
