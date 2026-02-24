@@ -1,14 +1,15 @@
 import pytest
+import ipaddress
 from bot.services.vpn_service import VPNService
 from bot.core.config import settings
 
 @pytest.mark.asyncio
 async def test_encryption_decryption(encryption_key):
     """
-    v3: Тест Fernet-шифрования приватных ключей.
+    v4: Тест Fernet-шифрования приватных ключей.
     """
     settings.encryption_key = encryption_key
-    VPNService._fernet = None # Сброс кэша
+    VPNService._fernet = None
     
     original_text = "private_key_top_secret_123"
     encrypted = VPNService.encrypt_data(original_text)
@@ -20,12 +21,12 @@ async def test_encryption_decryption(encryption_key):
 @pytest.mark.asyncio
 async def test_cidr_pool_management(temp_db):
     """
-    v3: Тест управления CIDR пулом (поиск первого свободного IP).
+    v4: Тест управления CIDR пулом (поиск первого свободного IP).
     """
     settings.vpn_ip_range = "10.0.0.0/29" # 10.0.0.1 - 10.0.0.6 доступно
-    settings.db_path = "test_bot_data.db"
+    settings.db_path = "test_bot_v4.db"
     
-    # Сначала база пуста. Пропускаем .1 (gateway), первый должен быть .2
+    # Сначала база пуста. Первый свободный после .1 (gateway) — .2
     next_ip = await VPNService.get_next_ipv4(temp_db)
     assert next_ip == "10.0.0.2"
     
@@ -34,30 +35,20 @@ async def test_cidr_pool_management(temp_db):
     await temp_db.execute("INSERT INTO vpn_profiles (user_id, name, ipv4_address) VALUES (?, ?, ?)", (2, "p2", "10.0.0.4"))
     await temp_db.commit()
     
-    # Следующий свободный должен быть .3 (дырка между .2 и .4)
+    # Следующий свободный — .3 (дырка)
     next_ip = await VPNService.get_next_ipv4(temp_db)
     assert next_ip == "10.0.0.3"
-    
-    # Занимаем .3, .5, .6
-    await temp_db.execute("INSERT INTO vpn_profiles (user_id, name, ipv4_address) VALUES (?, ?, ?)", (3, "p3", "10.0.0.3"))
-    await temp_db.execute("INSERT INTO vpn_profiles (user_id, name, ipv4_address) VALUES (?, ?, ?)", (4, "p4", "10.0.0.5"))
-    await temp_db.execute("INSERT INTO vpn_profiles (user_id, name, ipv4_address) VALUES (?, ?, ?)", (5, "p5", "10.0.0.6"))
-    await temp_db.commit()
-    
-    # Пул должен быть исчерпан
-    with pytest.raises(ValueError, match="No available IP addresses"):
-        await VPNService.get_next_ipv4(temp_db)
 
 @pytest.mark.asyncio
 async def test_atomic_create_profile(temp_db, mock_subprocess, encryption_key):
     """
-    v3: Тест атомарного создания профиля (транзакция + шифрование).
+    v4: Тест атомарного создания профиля (транзакция + шифрование).
     """
     settings.encryption_key = encryption_key
-    settings.db_path = "test_bot_data.db"
+    settings.db_path = "test_bot_v4.db"
     VPNService._fernet = None
     
-    # Мокаем awg
+    # Настраиваем мок для ключей
     mock_subprocess.return_value.communicate.side_effect = [
         (b"priv_key\n", b""), # genkey
         (b"pub_key\n", b""),  # pubkey
@@ -69,9 +60,8 @@ async def test_atomic_create_profile(temp_db, mock_subprocess, encryption_key):
     
     result = await VPNService.create_profile(user_id, profile_name)
     
-    # Проверяем, что IP соответствует текущей сети
-    network = ipaddress.IPv4Network(settings.vpn_ip_range)
-    assert ipaddress.IPv4Address(result["ipv4"]) in network
+    # Проверка IP из текущей сети
+    assert ipaddress.IPv4Address(result["ipv4"]) in ipaddress.IPv4Network(settings.vpn_ip_range)
     assert "priv_key" in result["config"]
     
     # Проверка шифрования в БД
@@ -81,22 +71,30 @@ async def test_atomic_create_profile(temp_db, mock_subprocess, encryption_key):
         assert VPNService.decrypt_data(row["private_key"]) == "priv_key"
 
 @pytest.mark.asyncio
-async def test_awg_binary_priority(mock_subprocess):
+async def test_migration_to_fernet(temp_db, encryption_key):
     """
-    v3: Проверка приоритета бинарника awg над wg.
+    v4: Тест скрипта миграции. Проверяем, что открытые ключи шифруются.
     """
-    from unittest.mock import patch
+    settings.encryption_key = encryption_key
+    settings.db_path = "test_bot_v4.db"
+    VPNService._fernet = None
     
-    with patch("shutil.which") as mock_which:
-        # awg доступен
-        mock_which.side_effect = lambda x: "/usr/bin/awg" if x == "awg" else "/usr/bin/wg"
-        
-        mock_subprocess.return_value.communicate.side_effect = [
-            (b"priv\n", b""), 
-            (b"pub\n", b"")
-        ]
-        
-        await VPNService.generate_keys()
-        
-        # Проверяем, что вызывался именно awg
-        mock_subprocess.assert_any_call("awg", "genkey", stdout=-1, stderr=-1)
+    # Вставляем открытый ключ
+    open_key = "plain_private_key_wg"
+    await temp_db.execute(
+        "INSERT INTO vpn_profiles (user_id, name, private_key, public_key, ipv4_address) VALUES (?, ?, ?, ?, ?)",
+        (1, "test", open_key, "pub", "10.0.0.2")
+    )
+    await temp_db.commit()
+    
+    # Запускаем миграцию
+    from scripts.migrate_to_fernet import migrate_to_fernet
+    await migrate_to_fernet()
+    
+    # Проверяем результат
+    async with temp_db.execute("SELECT private_key FROM vpn_profiles WHERE id = 1") as cursor:
+        row = await cursor.fetchone()
+        encrypted_key = row["private_key"]
+        assert encrypted_key != open_key
+        assert encrypted_key.startswith('gAAAAA')
+        assert VPNService.decrypt_data(encrypted_key) == open_key

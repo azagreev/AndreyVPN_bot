@@ -7,9 +7,9 @@ from unittest.mock import AsyncMock, patch
 @pytest_asyncio.fixture
 async def temp_db():
     """
-    Создает временную базу данных для тестов.
+    Создает временную БД для тестов с актуальной схемой.
     """
-    db_path = "test_bot_data.db"
+    db_path = "test_bot_v4.db"
     async with aiosqlite.connect(db_path) as db:
         db.row_factory = aiosqlite.Row
         # Создаем необходимые таблицы
@@ -45,15 +45,19 @@ async def temp_db():
         yield db
     
     if os.path.exists(db_path):
-        os.remove(db_path)
+        try:
+            os.remove(db_path)
+        except:
+            pass
 
 @pytest.fixture
 def mock_subprocess():
     """
-    Мок для asyncio.create_subprocess_exec.
+    Мок для asyncio.create_subprocess_exec (wg/awg calls).
     """
     with patch("asyncio.create_subprocess_exec") as mock:
         process = AsyncMock()
+        # По умолчанию возвращает успешный пустой ответ
         process.communicate.return_value = (b"mock_stdout\n", b"")
         process.returncode = 0
         mock.return_value = process
@@ -62,7 +66,7 @@ def mock_subprocess():
 @pytest.fixture
 def encryption_key():
     """
-    Валидный ключ для Fernet (32 url-safe base64-encoded bytes).
+    Валидный ключ Fernet для тестов.
     """
     from cryptography.fernet import Fernet
     return Fernet.generate_key().decode()
