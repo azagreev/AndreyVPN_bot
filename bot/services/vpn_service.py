@@ -84,7 +84,6 @@ class VPNService:
 
         binary = "awg" if shutil.which("awg") else "wg"
         try:
-            # Генерируем приватный ключ
             process_genkey = await asyncio.create_subprocess_exec(
                 binary, "genkey",
                 stdout=asyncio.subprocess.PIPE,
@@ -97,7 +96,6 @@ class VPNService:
             
             private_key = stdout.decode().strip()
 
-            # Генерируем публичный ключ
             process_pubkey = await asyncio.create_subprocess_exec(
                 binary, "pubkey",
                 stdin=asyncio.subprocess.PIPE,
@@ -127,12 +125,10 @@ class VPNService:
         if len(available_hosts) < 2:
             raise ValueError("IP range is too small")
         
-        # Получаем все занятые IP из базы
         async with db.execute("SELECT ipv4_address FROM vpn_profiles") as cursor:
             rows = await cursor.fetchall()
             used_ips = {row[0] for row in rows}
         
-        # Ищем первый свободный (начиная со второго хоста, т.е. .2, .1 обычно шлюз)
         for ip in available_hosts[1:]:
             ip_str = str(ip)
             if ip_str not in used_ips:
@@ -143,7 +139,7 @@ class VPNService:
     @classmethod
     async def sync_peer_with_server(cls, public_key: str, ipv4: str) -> bool:
         """
-        Добавляет пира в конфигурацию сервера WireGuard/AmneziaWG.
+        Добавляет пира в конфигурацию сервера.
         """
         if not cls._check_wg_installed():
             return False
@@ -169,65 +165,21 @@ class VPNService:
             return False
 
     @classmethod
-    async def get_all_peers_stats(cls) -> dict[str, dict[str, int]]:
-        """
-        Получает статистику трафика для всех пиров.
-        """
-        if not cls._check_wg_installed():
-            return {}
-
-        binary = "awg" if shutil.which("awg") else "wg"
-        try:
-            command = [binary, "show", settings.wg_interface, "dump"]
-            process = await asyncio.create_subprocess_exec(
-                *command,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
-            stdout, stderr = await process.communicate()
-            
-            if process.returncode != 0:
-                logger.error(f"Ошибка при получении статистики: {stderr.decode()}")
-                return {}
-
-            stats = {}
-            lines = stdout.decode().strip().split('\n')
-            for line in lines[1:]:
-                parts = line.split('\t')
-                if len(parts) >= 8:
-                    pub_key = parts[0]
-                    rx, tx = int(parts[6]), int(parts[7])
-                    stats[pub_key] = {'rx': rx, 'tx': tx, 'total': rx + tx}
-            return stats
-        except Exception as e:
-            logger.exception(f"Ошибка при получении статистики: {e}")
-            return {}
-
-    @classmethod
     async def create_profile(cls, user_id: int, name: str) -> dict:
         """
         Полный цикл создания профиля в одной атомарной транзакции БД.
-        Включает генерацию ключей, выбор свободного IP и шифрование.
         """
         async with aiosqlite.connect(settings.db_path) as db:
-            # Блокируем БД на запись (BEGIN IMMEDIATE) для предотвращения race condition при выборе IP
             await db.execute("BEGIN IMMEDIATE")
             try:
-                # 1. Генерация ключей WireGuard/AmneziaWG
                 private_key, public_key = await cls.generate_keys()
-                
-                # 2. Выбор ПЕРВОГО свободного IP в пуле (CIDR)
                 ipv4 = await cls.get_next_ipv4(db)
-                
-                # 3. Шифрование приватного ключа через Fernet перед сохранением
                 encrypted_private_key = cls.encrypt_data(private_key)
                 
-                # 4. Синхронизация с сервером (выполняется внутри транзакции для надежности)
                 synced = await cls.sync_peer_with_server(public_key, ipv4)
                 if not synced:
-                    logger.warning(f"Синхронизация с сервером не удалась для {public_key}. Профиль будет сохранен в БД.")
+                    logger.warning(f"Синхронизация с сервером не удалась для {public_key}.")
 
-                # 5. Сохранение в БД
                 query = """
                 INSERT INTO vpn_profiles (user_id, name, private_key, public_key, ipv4_address)
                 VALUES (?, ?, ?, ?, ?);
@@ -276,9 +228,6 @@ AllowedIPs = 0.0.0.0/0
 
     @classmethod
     def generate_qr_code(cls, content: str) -> bytes:
-        """
-        Генерирует QR-код из строки контента (PNG).
-        """
         import segno
         import io
         qr = segno.make(content, error='M')
@@ -288,9 +237,6 @@ AllowedIPs = 0.0.0.0/0
 
     @staticmethod
     def format_bytes(size_bytes: int) -> str:
-        """
-        Человекочитаемый формат байтов.
-        """
         import math
         if size_bytes == 0:
             return "0 Б"
@@ -302,9 +248,6 @@ AllowedIPs = 0.0.0.0/0
 
     @classmethod
     async def get_monthly_usage(cls, db: aiosqlite.Connection, user_id: int) -> list[dict]:
-        """
-        Потребление трафика за месяц для всех профилей пользователя.
-        """
         await cls.check_and_perform_monthly_reset(db)
         all_stats = await cls.get_all_peers_stats()
         query = "SELECT name, public_key, ipv4_address, monthly_offset_bytes FROM vpn_profiles WHERE user_id = ?"
@@ -327,9 +270,6 @@ AllowedIPs = 0.0.0.0/0
 
     @classmethod
     async def check_and_perform_monthly_reset(cls, db: aiosqlite.Connection):
-        """
-        Ежемесячный сброс счетчиков трафика (через оффсеты).
-        """
         from datetime import datetime
         now = datetime.now()
         current_month_key = now.strftime("%Y-%m")

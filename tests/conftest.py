@@ -9,10 +9,9 @@ async def temp_db():
     """
     Создает временную БД для тестов с актуальной схемой.
     """
-    db_path = "test_bot_v4.db"
+    db_path = "test_bot_v5.db"
     async with aiosqlite.connect(db_path) as db:
         db.row_factory = aiosqlite.Row
-        # Создаем необходимые таблицы
         await db.execute("""
             CREATE TABLE IF NOT EXISTS users (
                 telegram_id INTEGER PRIMARY KEY,
@@ -57,7 +56,6 @@ def mock_subprocess():
     """
     with patch("asyncio.create_subprocess_exec") as mock:
         process = AsyncMock()
-        # По умолчанию возвращает успешный пустой ответ
         process.communicate.return_value = (b"mock_stdout\n", b"")
         process.returncode = 0
         mock.return_value = process
