@@ -9,7 +9,7 @@ from bot.core.config import settings
 
 class VPNService:
     """
-    Сервис для управления VPN-профилями и ключами WireGuard/AmneziaWG.
+    v6: Сервис для управления VPN-профилями с поддержкой AmneziaWG и Fernet-шифрования.
     """
     _fernet: Fernet | None = None
 
@@ -22,7 +22,7 @@ class VPNService:
             return cls._fernet
         
         if not settings.encryption_key:
-            logger.warning("Encryption key is not set! Sensitive data will be stored as-is (UNSAFE).")
+            logger.warning("ENCRYPTION_KEY is not set! Sensitive data will be stored as-is (UNSAFE).")
             return None
         
         try:
@@ -38,9 +38,6 @@ class VPNService:
 
     @classmethod
     def encrypt_data(cls, data: str) -> str:
-        """
-        Шифрует строку данных.
-        """
         fernet = cls._get_fernet()
         if not fernet:
             return data
@@ -48,9 +45,6 @@ class VPNService:
 
     @classmethod
     def decrypt_data(cls, encrypted_data: str) -> str:
-        """
-        Расшифровывает данные.
-        """
         fernet = cls._get_fernet()
         if not fernet:
             return encrypted_data
@@ -62,23 +56,15 @@ class VPNService:
 
     @staticmethod
     def _check_wg_installed() -> bool:
-        """
-        Проверяет наличие утилиты 'wg' или 'awg' в системе.
-        Для AmneziaWG рекомендуется проверять наличие awg.
-        """
         if shutil.which("awg") is not None:
             return True
         if shutil.which("wg") is None:
-            logger.error("Утилиты 'wg' или 'awg' не найдены. Убедитесь, что AmneziaWG или WireGuard установлены.")
+            logger.error("Utilities 'wg' or 'awg' not found.")
             return False
         return True
 
     @classmethod
     async def generate_keys(cls) -> tuple[str, str]:
-        """
-        Генерирует пару ключей (private key, public key).
-        Приоритет отдается утилите 'awg', если её нет — 'wg'.
-        """
         if not cls._check_wg_installed():
             raise RuntimeError("WireGuard/AmneziaWG utilities not found")
 
@@ -91,8 +77,7 @@ class VPNService:
             )
             stdout, stderr = await process_genkey.communicate()
             if process_genkey.returncode != 0:
-                logger.error(f"Ошибка при генерации приватного ключа: {stderr.decode()}")
-                raise RuntimeError(f"Failed to generate private key with {binary}")
+                raise RuntimeError(f"Failed to generate private key: {stderr.decode()}")
             
             private_key = stdout.decode().strip()
 
@@ -104,21 +89,17 @@ class VPNService:
             )
             stdout, stderr = await process_pubkey.communicate(input=private_key.encode())
             if process_pubkey.returncode != 0:
-                logger.error(f"Ошибка при генерации публичного ключа: {stderr.decode()}")
-                raise RuntimeError(f"Failed to generate public key with {binary}")
+                raise RuntimeError(f"Failed to generate public key: {stderr.decode()}")
             
-            public_key = stdout.decode().strip()
-            return private_key, public_key
-
+            return private_key, stdout.decode().strip()
         except Exception as e:
-            logger.exception(f"Непредвиденная ошибка при генерации ключей: {e}")
+            logger.exception(f"Error generating keys: {e}")
             raise e
 
     @classmethod
     async def get_next_ipv4(cls, db: aiosqlite.Connection) -> str:
         """
-        Вычисляет ПЕРВЫЙ свободный IPv4-адрес в CIDR-пуле.
-        Принимает существующее соединение для атомарности внутри транзакции.
+        Вычисляет ПЕРВЫЙ свободный IPv4-адрес в CIDR пуле.
         """
         network = ipaddress.IPv4Network(settings.vpn_ip_range, strict=False)
         available_hosts = list(network.hosts())
@@ -137,57 +118,25 @@ class VPNService:
         raise ValueError("No available IP addresses in the configured range")
 
     @classmethod
-    async def sync_peer_with_server(cls, public_key: str, ipv4: str) -> bool:
-        """
-        Добавляет пира в конфигурацию сервера.
-        """
-        if not cls._check_wg_installed():
-            return False
-
-        binary = "awg" if shutil.which("awg") else "wg"
-        try:
-            command = [binary, "set", settings.wg_interface, "peer", public_key, "allowed-ips", f"{ipv4}/32"]
-            process = await asyncio.create_subprocess_exec(
-                *command,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
-            _, stderr = await process.communicate()
-            
-            if process.returncode == 0:
-                logger.info(f"Пир {public_key} успешно добавлен на сервер ({ipv4})")
-                return True
-            else:
-                logger.error(f"Ошибка при синхронизации пира: {stderr.decode()}")
-                return False
-        except Exception as e:
-            logger.exception(f"Непредвиденная ошибка при синхронизации: {e}")
-            return False
-
-    @classmethod
     async def create_profile(cls, user_id: int, name: str) -> dict:
         """
-        Полный цикл создания профиля в одной атомарной транзакции БД.
+        Атомарное создание профиля (v6).
         """
         async with aiosqlite.connect(settings.db_path) as db:
             await db.execute("BEGIN IMMEDIATE")
             try:
                 private_key, public_key = await cls.generate_keys()
                 ipv4 = await cls.get_next_ipv4(db)
-                encrypted_private_key = cls.encrypt_data(private_key)
+                encrypted_key = cls.encrypt_data(private_key)
                 
+                # Синхронизация с сервером
                 synced = await cls.sync_peer_with_server(public_key, ipv4)
-                if not synced:
-                    logger.warning(f"Синхронизация с сервером не удалась для {public_key}.")
-
-                query = """
-                INSERT INTO vpn_profiles (user_id, name, private_key, public_key, ipv4_address)
-                VALUES (?, ?, ?, ?, ?);
-                """
-                await db.execute(query, (user_id, name, encrypted_private_key, public_key, ipv4))
+                
+                await db.execute(
+                    "INSERT INTO vpn_profiles (user_id, name, private_key, public_key, ipv4_address) VALUES (?, ?, ?, ?, ?)",
+                    (user_id, name, encrypted_key, public_key, ipv4)
+                )
                 await db.commit()
-            
-                logger.success(f"Профиль '{name}' для пользователя {user_id} успешно создан (IP: {ipv4}).")
                 
                 return {
                     "name": name,
@@ -197,15 +146,42 @@ class VPNService:
                 }
             except Exception as e:
                 await db.rollback()
-                logger.error(f"Ошибка при создании профиля: {e}")
+                logger.error(f"Failed to create profile: {e}")
                 raise e
 
     @classmethod
+    async def update_profile(cls, profile_id: int, new_name: str | None = None) -> bool:
+        """
+        v6: Обновление существующего профиля.
+        """
+        async with aiosqlite.connect(settings.db_path) as db:
+            if not new_name:
+                return False
+            try:
+                await db.execute("UPDATE vpn_profiles SET name = ? WHERE id = ?", (new_name, profile_id))
+                await db.commit()
+                return True
+            except Exception as e:
+                logger.error(f"Failed to update profile: {e}")
+                return False
+
+    @classmethod
+    async def sync_peer_with_server(cls, public_key: str, ipv4: str) -> bool:
+        if not cls._check_wg_installed():
+            return False
+        binary = "awg" if shutil.which("awg") else "wg"
+        try:
+            command = [binary, "set", settings.wg_interface, "peer", public_key, "allowed-ips", f"{ipv4}/32"]
+            process = await asyncio.create_subprocess_exec(*command, stderr=asyncio.subprocess.PIPE)
+            _, stderr = await process.communicate()
+            return process.returncode == 0
+        except Exception as e:
+            logger.error(f"Sync error: {e}")
+            return False
+
+    @classmethod
     def generate_config_content(cls, private_key: str, ipv4: str) -> str:
-        """
-        Формирует строку конфигурации .conf для клиента AmneziaWG.
-        """
-        config = f"""[Interface]
+        return f"""[Interface]
 PrivateKey = {private_key}
 Address = {ipv4}/32
 DNS = {settings.dns_servers}
@@ -224,61 +200,39 @@ PublicKey = {settings.server_pub_key}
 Endpoint = {settings.server_endpoint}
 AllowedIPs = 0.0.0.0/0
 """
-        return config
-
-    @classmethod
-    def generate_qr_code(cls, content: str) -> bytes:
-        import segno
-        import io
-        qr = segno.make(content, error='M')
-        out = io.BytesIO()
-        qr.save(out, kind='png', scale=10)
-        return out.getvalue()
-
-    @staticmethod
-    def format_bytes(size_bytes: int) -> str:
-        import math
-        if size_bytes == 0:
-            return "0 Б"
-        size_name = ("Б", "КБ", "МБ", "ГБ", "ТБ")
-        i = int(math.floor(math.log(size_bytes, 1024)))
-        p = math.pow(1024, i)
-        s = round(size_bytes / p, 2)
-        return f"{s} {size_name[i]}"
 
     @classmethod
     async def get_monthly_usage(cls, db: aiosqlite.Connection, user_id: int) -> list[dict]:
-        await cls.check_and_perform_monthly_reset(db)
         all_stats = await cls.get_all_peers_stats()
-        query = "SELECT name, public_key, ipv4_address, monthly_offset_bytes FROM vpn_profiles WHERE user_id = ?"
+        query = "SELECT id, name, public_key, ipv4_address, monthly_offset_bytes FROM vpn_profiles WHERE user_id = ?"
         results = []
         async with db.execute(query, (user_id,)) as cursor:
             async for row in cursor:
-                pub_key = row[1]
-                offset = row[3] or 0
-                stats = all_stats.get(pub_key, {'rx': 0, 'tx': 0, 'total': 0})
-                current_total = stats['total']
-                monthly_bytes = current_total if current_total < offset else current_total - offset
+                pub_key = row[2]
+                offset = row[4] or 0
+                stats = all_stats.get(pub_key, {'total': 0, 'rx': 0, 'tx': 0})
+                monthly_total = stats['total'] - offset if stats['total'] >= offset else stats['total']
                 results.append({
-                    "name": row[0],
-                    "ip": row[2],
-                    "rx": stats['rx'],
-                    "tx": stats['tx'],
-                    "monthly_total": monthly_bytes
+                    "id": row[0],
+                    "name": row[1],
+                    "ip": row[3],
+                    "monthly_total": monthly_total
                 })
         return results
 
     @classmethod
-    async def check_and_perform_monthly_reset(cls, db: aiosqlite.Connection):
-        from datetime import datetime
-        now = datetime.now()
-        current_month_key = now.strftime("%Y-%m")
-        async with db.execute("SELECT value FROM configs WHERE key = 'last_traffic_reset'", ()) as cursor:
-            row = await cursor.fetchone()
-            if not row or row[0] != current_month_key:
-                all_stats = await cls.get_all_peers_stats()
-                for pub_key, stat in all_stats.items():
-                    await db.execute("UPDATE vpn_profiles SET monthly_offset_bytes = ? WHERE public_key = ?", (stat['total'], pub_key))
-                await db.execute("INSERT OR REPLACE INTO configs (key, value) VALUES ('last_traffic_reset', ?)", (current_month_key,))
-                await db.commit()
-                logger.success(f"Ежемесячный сброс завершен ({current_month_key}).")
+    async def get_all_peers_stats(cls) -> dict[str, dict[str, int]]:
+        if not cls._check_wg_installed():
+            return {}
+        binary = "awg" if shutil.which("awg") else "wg"
+        try:
+            process = await asyncio.create_subprocess_exec(binary, "show", settings.wg_interface, "dump", stdout=asyncio.subprocess.PIPE)
+            stdout, _ = await process.communicate()
+            stats = {}
+            for line in stdout.decode().strip().split('\n')[1:]:
+                parts = line.split('\t')
+                if len(parts) >= 8:
+                    stats[parts[0]] = {'rx': int(parts[6]), 'tx': int(parts[7]), 'total': int(parts[6]) + int(parts[7])}
+            return stats
+        except Exception:
+            return {}

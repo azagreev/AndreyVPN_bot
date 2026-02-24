@@ -6,10 +6,7 @@ from unittest.mock import AsyncMock, patch
 
 @pytest_asyncio.fixture
 async def temp_db():
-    """
-    Создает временную БД для тестов с актуальной схемой.
-    """
-    db_path = "test_bot_v5.db"
+    db_path = "test_bot_v6.db"
     async with aiosqlite.connect(db_path) as db:
         db.row_factory = aiosqlite.Row
         await db.execute("""
@@ -17,8 +14,7 @@ async def temp_db():
                 telegram_id INTEGER PRIMARY KEY,
                 username TEXT,
                 full_name TEXT,
-                is_approved BOOLEAN DEFAULT 0,
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                is_approved BOOLEAN DEFAULT 0
             )
         """)
         await db.execute("""
@@ -30,41 +26,27 @@ async def temp_db():
                 public_key TEXT,
                 ipv4_address TEXT,
                 monthly_offset_bytes INTEGER DEFAULT 0,
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY(user_id) REFERENCES users(telegram_id)
-            )
-        """)
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS configs (
-                key TEXT PRIMARY KEY,
-                value TEXT
             )
         """)
         await db.commit()
         yield db
-    
     if os.path.exists(db_path):
         try:
             os.remove(db_path)
-        except:
+        except Exception:
             pass
 
 @pytest.fixture
 def mock_subprocess():
-    """
-    Мок для asyncio.create_subprocess_exec (wg/awg calls).
-    """
     with patch("asyncio.create_subprocess_exec") as mock:
         process = AsyncMock()
-        process.communicate.return_value = (b"mock_stdout\n", b"")
+        process.communicate.return_value = (b"mock_out\n", b"")
         process.returncode = 0
         mock.return_value = process
         yield mock
 
 @pytest.fixture
 def encryption_key():
-    """
-    Валидный ключ Fernet для тестов.
-    """
     from cryptography.fernet import Fernet
     return Fernet.generate_key().decode()
