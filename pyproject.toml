@@ -1,0 +1,23 @@
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+exclude = ["venv", ".venv"]
+
+[tool.ruff.lint]
+select = ["E", "F", "B"]
+ignore = ["E402", "E501"]
+
+[tool.mypy]
+python_version = "3.12"
+files = ["bot/core", "bot/db", "bot/services", "scripts/migrate_to_fernet.py", "tests"]
+warn_unused_configs = true
+check_untyped_defs = true
+warn_return_any = true
+warn_unused_ignores = true
+disallow_incomplete_defs = false
+disallow_untyped_defs = false
+ignore_missing_imports = true
+exclude = "(^venv/|^\\.venv/)"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"

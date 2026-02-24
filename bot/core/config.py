@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     
     # Ключ для шифрования приватных ключей VPN (Fernet)
     # Можно сгенерировать через: cryptography.fernet.Fernet.generate_key()
-    encryption_key: SecretStr = Field(default=None)
+    encryption_key: SecretStr | None = Field(default=None)
 
     # Настройки AmneziaWG
     wg_interface: str = "awg0"
@@ -42,4 +42,4 @@ class Settings(BaseSettings):
 
 
 # Создаем экземпляр настроек для использования в проекте
-settings = Settings()
+settings = Settings()  # type: ignore[call-arg]

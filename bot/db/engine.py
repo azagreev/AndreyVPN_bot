@@ -11,6 +11,7 @@ async def init_db(db_path: str):
     """
     try:
         async with aiosqlite.connect(db_path) as db:
+            await db.execute("PRAGMA foreign_keys = ON")
             logger.info(f"Подключение к базе данных по пути: {db_path}")
             
             for table_query in ALL_TABLES:
@@ -21,4 +22,4 @@ async def init_db(db_path: str):
             
     except Exception as e:
         logger.error(f"Ошибка при инициализации базы данных: {e}")
-        raise e
+        raise

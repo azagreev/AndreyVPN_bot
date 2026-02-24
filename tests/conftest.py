@@ -1,52 +1,50 @@
+from collections.abc import AsyncIterator, Iterator
+from pathlib import Path
+
+import aiosqlite
 import pytest
 import pytest_asyncio
-import aiosqlite
-import os
-from unittest.mock import AsyncMock, patch
+from cryptography.fernet import Fernet
+from pydantic import SecretStr
+
+from bot.core.config import settings
+from bot.db.engine import init_db
+from bot.services.vpn_service import VPNService
+
+
+@pytest.fixture
+def fernet_key() -> str:
+    return Fernet.generate_key().decode("utf-8")
+
+
+@pytest.fixture(autouse=True)
+def reset_vpn_service_cache() -> Iterator[None]:
+    VPNService.reset_cache()
+    yield
+    VPNService.reset_cache()
+
+
+@pytest.fixture
+def test_settings(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, fernet_key: str) -> Path:
+    db_path = tmp_path / "test_bot_v6.db"
+    monkeypatch.setattr(settings, "db_path", str(db_path), raising=False)
+    monkeypatch.setattr(settings, "vpn_ip_range", "10.0.0.0/29", raising=False)
+    monkeypatch.setattr(settings, "encryption_key", SecretStr(fernet_key), raising=False)
+    monkeypatch.setattr(settings, "wg_interface", "awg0", raising=False)
+    monkeypatch.setattr(settings, "server_pub_key", "test_server_public_key", raising=False)
+    monkeypatch.setattr(settings, "server_endpoint", "198.51.100.10:51820", raising=False)
+    monkeypatch.setattr(settings, "dns_servers", "1.1.1.1, 8.8.8.8", raising=False)
+    return db_path
+
 
 @pytest_asyncio.fixture
-async def temp_db():
-    db_path = "test_bot_v6.db"
-    async with aiosqlite.connect(db_path) as db:
+async def prepared_db(test_settings: Path) -> AsyncIterator[Path]:
+    await init_db(str(test_settings))
+    yield test_settings
+
+
+@pytest_asyncio.fixture
+async def db_connection(prepared_db: Path) -> AsyncIterator[aiosqlite.Connection]:
+    async with aiosqlite.connect(prepared_db) as db:
         db.row_factory = aiosqlite.Row
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS users (
-                telegram_id INTEGER PRIMARY KEY,
-                username TEXT,
-                full_name TEXT,
-                is_approved BOOLEAN DEFAULT 0
-            )
-        """)
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS vpn_profiles (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER,
-                name TEXT,
-                private_key TEXT,
-                public_key TEXT,
-                ipv4_address TEXT,
-                monthly_offset_bytes INTEGER DEFAULT 0,
-                FOREIGN KEY(user_id) REFERENCES users(telegram_id)
-            )
-        """)
-        await db.commit()
         yield db
-    if os.path.exists(db_path):
-        try:
-            os.remove(db_path)
-        except Exception:
-            pass
-
-@pytest.fixture
-def mock_subprocess():
-    with patch("asyncio.create_subprocess_exec") as mock:
-        process = AsyncMock()
-        process.communicate.return_value = (b"mock_out\n", b"")
-        process.returncode = 0
-        mock.return_value = process
-        yield mock
-
-@pytest.fixture
-def encryption_key():
-    from cryptography.fernet import Fernet
-    return Fernet.generate_key().decode()
