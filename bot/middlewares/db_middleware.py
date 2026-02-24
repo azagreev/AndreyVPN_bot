@@ -2,7 +2,6 @@ import aiosqlite
 from typing import Any, Awaitable, Callable, Dict
 from aiogram import BaseMiddleware
 from aiogram.types import TelegramObject
-from loguru import logger
 from bot.core.config import settings
 
 

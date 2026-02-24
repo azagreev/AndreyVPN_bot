@@ -1,5 +1,5 @@
 import random
-from aiogram import Router, types, Bot
+from aiogram import Router, Bot
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -44,11 +44,8 @@ async def cmd_start(message: Message, db: aiosqlite.Connection, state: FSMContex
     await state.set_state(CaptchaStates.waiting_for_answer)
     
     await message.answer(
-        f"Добро пожаловать в VPN-бот! 🛡️
-
-"
-        f"Для предотвращения автоматических регистраций, пожалуйста, решите простой пример:
-"
+        f"Добро пожаловать в VPN-бот! 🛡️\n\n"
+        f"Для предотвращения автоматических регистраций, пожалуйста, решите простой пример:\n"
         f"Сколько будет {a} + {b}?"
     )
 
@@ -67,8 +64,7 @@ async def process_captcha(message: Message, db: aiosqlite.Connection, state: FSM
         b = random.randint(1, 20)
         answer = a + b
         await state.update_data(captcha_answer=answer)
-        await message.answer(f"❌ Неверно. Попробуйте еще раз:
-Сколько будет {a} + {b}?")
+        await message.answer(f"❌ Неверно. Попробуйте еще раз:\nСколько будет {a} + {b}?")
         return
 
     # Капча пройдена

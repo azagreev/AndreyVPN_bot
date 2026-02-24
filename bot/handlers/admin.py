@@ -2,7 +2,6 @@ from aiogram import Router, F, Bot
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters.callback_data import CallbackData
 import aiosqlite
-from bot.core.config import settings
 
 router = Router()
 
@@ -33,9 +32,7 @@ async def handle_approve(callback_query: CallbackQuery, callback_data: ApproveCa
     
     await callback_query.answer("Пользователь одобрен!")
     await callback_query.message.edit_text(
-        callback_query.message.text + "
-
-✅ Одобрено."
+        f"{callback_query.message.text}\n\n✅ Одобрено."
     )
     
     # Уведомляем пользователя
@@ -63,9 +60,7 @@ async def handle_reject(callback_query: CallbackQuery, callback_data: ApproveCal
     
     await callback_query.answer("Пользователь отклонен.")
     await callback_query.message.edit_text(
-        callback_query.message.text + "
-
-❌ Отклонено."
+        f"{callback_query.message.text}\n\n❌ Отклонено."
     )
     
     # Уведомляем пользователя

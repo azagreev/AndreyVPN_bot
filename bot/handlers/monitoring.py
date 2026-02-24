@@ -1,4 +1,4 @@
-from aiogram import Router, types
+from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message
 import aiosqlite
@@ -63,13 +63,9 @@ async def cmd_server_status(message: Message):
         status_text = f"Ошибка: {status_data.get('message', 'Неизвестно')}"
     
     response = (
-        f"🖥️ <b>Статус сервера</b>
-
-"
-        f"Состояние: {status_icon} {status_text}
-"
-        f"Интерфейс: <code>{status_data.get('interface', 'n/a')}</code>
-"
+        f"🖥️ <b>Статус сервера</b>\n\n"
+        f"Состояние: {status_icon} {status_text}\n"
+        f"Интерфейс: <code>{status_data.get('interface', 'n/a')}</code>\n"
         f"Активных пиров: {status_data.get('active_peers_count', 0)}"
     )
     

@@ -13,9 +13,6 @@ async def test_monitoring():
     
     # 1. Тест парсинга (заглушка для wg show dump)
     # Формат: interface public_key preshared_key endpoint allowed_ips latest_handshake transfer_rx transfer_tx persistent_keepalive
-    mock_output = """wg0
-PubKey1	(none)	1.2.3.4:5678	10.8.0.2/32	12345678	5000000	10000000	(none)
-PubKey2	(none)	5.6.7.8:1234	10.8.0.3/32	12345679	1000000	2000000	(none)"""
     
     print("Mocking 'wg show dump' output...")
     # Мы не можем легко подменить subprocess, но можем проверить метод format_bytes

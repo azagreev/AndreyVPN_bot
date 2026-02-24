@@ -1,8 +1,7 @@
-from aiogram import Router, F, types, Bot
+from aiogram import Router, F, Bot
 from aiogram.filters import Command
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, BufferedInputFile
 from aiogram.filters.callback_data import CallbackData
-import aiosqlite
 from bot.core.config import settings
 from bot.services.vpn_service import VPNService
 from loguru import logger
@@ -34,9 +33,8 @@ async def cmd_menu(message: Message):
     Главное меню для одобренных пользователей.
     """
     await message.answer(
-        "Главное меню управления VPN 🛡️
-
-Вы можете запросить новый конфигурационный файл для подключения.",
+        "Главное меню управления VPN 🛡️\n\n"
+        "Вы можете запросить новый конфигурационный файл для подключения.",
         reply_markup=get_main_keyboard()
     )
 
@@ -49,19 +47,16 @@ async def handle_vpn_request(callback_query: CallbackQuery, bot: Bot):
     
     await callback_query.answer("Запрос отправлен администратору.")
     await callback_query.message.edit_text(
-        "⏳ Ваш запрос на получение VPN-профиля отправлен администратору. 
-Ожидайте уведомления о готовности."
+        "⏳ Ваш запрос на получение VPN-профиля отправлен администратору. \n"
+        "Ожидайте уведомления о готовности."
     )
     
     # Уведомление админа
     try:
         await bot.send_message(
             settings.admin_id,
-            f"🔑 <b>Запрос на VPN-конфиг</b>
-
-"
-            f"От: {user.full_name} (@{user.username or 'id' + str(user.id)})
-"
+            f"🔑 <b>Запрос на VPN-конфиг</b>\n\n"
+            f"От: {user.full_name} (@{user.username or 'id' + str(user.id)})\n"
             f"ID: {user.id}",
             reply_markup=get_admin_vpn_keyboard(user.id)
         )
@@ -77,9 +72,7 @@ async def handle_vpn_approve(callback_query: CallbackQuery, callback_data: Profi
     
     await callback_query.answer("Генерирую конфиг...")
     await callback_query.message.edit_text(
-        callback_query.message.text + "
-
-⏳ <b>Генерация профиля...</b>"
+        f"{callback_query.message.text}\n\n⏳ <b>Генерация профиля...</b>"
     )
     
     try:
@@ -98,22 +91,18 @@ async def handle_vpn_approve(callback_query: CallbackQuery, callback_data: Profi
         await bot.send_photo(
             user_id,
             photo=qr_file,
-            caption=f"✅ <b>Ваш VPN-профиль готов!</b>
-
-"
-                    f"1. Установите приложение <b>AmneziaWG</b>
-"
-                    f"2. Отсканируйте этот QR-код или импортируйте .conf файл
-"
-                    f"3. Подключитесь и пользуйтесь! 🚀"
+            caption=(
+                "✅ <b>Ваш VPN-профиль готов!</b>\n\n"
+                "1. Установите приложение <b>AmneziaWG</b>\n"
+                "2. Отсканируйте этот QR-код или импортируйте .conf файл\n"
+                "3. Подключитесь и пользуйтесь! 🚀"
+            )
         )
         await bot.send_document(user_id, document=conf_file)
         
         # Обновляем сообщение у админа
         await callback_query.message.edit_text(
-            callback_query.message.text.replace("⏳ <b>Генерация профиля...</b>", "") + "
-
-✅ <b>Конфиг выдан и отправлен пользователю.</b>"
+            f"{callback_query.message.text.replace('⏳ <b>Генерация профиля...</b>', '')}\n\n✅ <b>Конфиг выдан и отправлен пользователю.</b>"
         )
         
     except Exception as e:
@@ -128,9 +117,7 @@ async def handle_vpn_reject(callback_query: CallbackQuery, callback_data: Profil
     user_id = callback_data.user_id
     
     await callback_query.message.edit_text(
-        callback_query.message.text + "
-
-❌ <b>Запрос отклонен.</b>"
+        f"{callback_query.message.text}\n\n❌ <b>Запрос отклонен.</b>"
     )
     
     try:
