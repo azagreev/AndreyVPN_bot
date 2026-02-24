@@ -63,7 +63,7 @@ class VPNService:
     @staticmethod
     def _check_wg_installed() -> bool:
         """
-        Проверяет наличие утилиты 'wg' или 'awg-quick' в системе.
+        Проверяет наличие утилиты 'wg' или 'awg' в системе.
         Для AmneziaWG рекомендуется проверять наличие awg.
         """
         if shutil.which("awg") is not None:
@@ -117,51 +117,39 @@ class VPNService:
             raise e
 
     @classmethod
-    async def get_next_ipv4(cls) -> str:
+    async def get_next_ipv4(cls, db: aiosqlite.Connection) -> str:
         """
-        Вычисляет следующий свободный IPv4-адрес с использованием библиотеки ipaddress.
-        Использует vpn_ip_range (например, 10.8.0.0/24).
+        Вычисляет ПЕРВЫЙ свободный IPv4-адрес в CIDR-пуле.
+        Принимает существующее соединение для атомарности внутри транзакции.
         """
-        try:
-            network = ipaddress.IPv4Network(settings.vpn_ip_range, strict=False)
-            # Список всех доступных хостов (пропуская .0 и .1, так как .1 обычно шлюз)
-            available_hosts = list(network.hosts())
-            if len(available_hosts) < 2:
-                raise ValueError("IP range is too small")
-            
-            start_ip = available_hosts[1]  # По умолчанию .2
-            
-            async with aiosqlite.connect(settings.db_path) as db:
-                query = "SELECT ipv4_address FROM vpn_profiles ORDER BY id DESC LIMIT 1;"
-                async with db.execute(query) as cursor:
-                    row = await cursor.fetchone()
-                    if row:
-                        last_ip = ipaddress.IPv4Address(row[0])
-                        # Ищем следующий IP после последнего в БД
-                        if last_ip in available_hosts:
-                            idx = available_hosts.index(last_ip)
-                            if idx + 1 < len(available_hosts):
-                                return str(available_hosts[idx + 1])
-                            else:
-                                raise ValueError("IP range exhausted")
-            
-            return str(start_ip)
-        except Exception as e:
-            logger.warning(f"Ошибка при расчете IP: {e}. Используем начальный IP.")
-            return "10.8.0.2"
+        network = ipaddress.IPv4Network(settings.vpn_ip_range, strict=False)
+        available_hosts = list(network.hosts())
+        if len(available_hosts) < 2:
+            raise ValueError("IP range is too small")
+        
+        # Получаем все занятые IP из базы
+        async with db.execute("SELECT ipv4_address FROM vpn_profiles") as cursor:
+            rows = await cursor.fetchall()
+            used_ips = {row[0] for row in rows}
+        
+        # Ищем первый свободный (начиная со второго хоста, т.е. .2, .1 обычно шлюз)
+        for ip in available_hosts[1:]:
+            ip_str = str(ip)
+            if ip_str not in used_ips:
+                return ip_str
+        
+        raise ValueError("No available IP addresses in the configured range")
 
     @classmethod
     async def sync_peer_with_server(cls, public_key: str, ipv4: str) -> bool:
         """
-        Добавляет пира в конфигурацию сервера.
+        Добавляет пира в конфигурацию сервера WireGuard/AmneziaWG.
         """
         if not cls._check_wg_installed():
             return False
 
         binary = "awg" if shutil.which("awg") else "wg"
         try:
-            # Для AmneziaWG параметры обфускации (Jc, S1 и т.д.) задаются на уровне интерфейса,
-            # но добавление пира делается так же.
             command = [binary, "set", settings.wg_interface, "peer", public_key, "allowed-ips", f"{ipv4}/32"]
             process = await asyncio.create_subprocess_exec(
                 *command,
@@ -183,7 +171,7 @@ class VPNService:
     @classmethod
     async def get_all_peers_stats(cls) -> dict[str, dict[str, int]]:
         """
-        Получает статистику трафика.
+        Получает статистику трафика для всех пиров.
         """
         if not cls._check_wg_installed():
             return {}
@@ -218,23 +206,28 @@ class VPNService:
     @classmethod
     async def create_profile(cls, user_id: int, name: str) -> dict:
         """
-        Создает профиль, шифрует приватный ключ и сохраняет в БД.
+        Полный цикл создания профиля в одной атомарной транзакции БД.
+        Включает генерацию ключей, выбор свободного IP и шифрование.
         """
-        # 1. Генерация ключей
-        private_key, public_key = await cls.generate_keys()
-        
-        # 2. Выбор IP
-        ipv4 = await cls.get_next_ipv4()
-        
-        # 3. Шифрование приватного ключа для хранения
-        encrypted_private_key = cls.encrypt_data(private_key)
-        
-        # 4. Синхронизация с сервером
-        synced = await cls.sync_peer_with_server(public_key, ipv4)
+        async with aiosqlite.connect(settings.db_path) as db:
+            # Блокируем БД на запись (BEGIN IMMEDIATE) для предотвращения race condition при выборе IP
+            await db.execute("BEGIN IMMEDIATE")
+            try:
+                # 1. Генерация ключей WireGuard/AmneziaWG
+                private_key, public_key = await cls.generate_keys()
+                
+                # 2. Выбор ПЕРВОГО свободного IP в пуле (CIDR)
+                ipv4 = await cls.get_next_ipv4(db)
+                
+                # 3. Шифрование приватного ключа через Fernet перед сохранением
+                encrypted_private_key = cls.encrypt_data(private_key)
+                
+                # 4. Синхронизация с сервером (выполняется внутри транзакции для надежности)
+                synced = await cls.sync_peer_with_server(public_key, ipv4)
+                if not synced:
+                    logger.warning(f"Синхронизация с сервером не удалась для {public_key}. Профиль будет сохранен в БД.")
 
-        # 5. Сохранение в БД
-        try:
-            async with aiosqlite.connect(settings.db_path) as db:
+                # 5. Сохранение в БД
                 query = """
                 INSERT INTO vpn_profiles (user_id, name, private_key, public_key, ipv4_address)
                 VALUES (?, ?, ?, ?, ?);
@@ -242,25 +235,23 @@ class VPNService:
                 await db.execute(query, (user_id, name, encrypted_private_key, public_key, ipv4))
                 await db.commit()
             
-            logger.success(f"Профиль '{name}' для пользователя {user_id} успешно создан.")
-            
-            # Генерация конфига (используем расшифрованный ключ для конфига)
-            config_content = cls.generate_config_content(private_key, ipv4)
-            
-            return {
-                "name": name,
-                "ipv4": ipv4,
-                "config": config_content,
-                "synced": synced
-            }
-        except Exception as e:
-            logger.error(f"Ошибка при сохранении профиля: {e}")
-            raise e
+                logger.success(f"Профиль '{name}' для пользователя {user_id} успешно создан (IP: {ipv4}).")
+                
+                return {
+                    "name": name,
+                    "ipv4": ipv4,
+                    "config": cls.generate_config_content(private_key, ipv4),
+                    "synced": synced
+                }
+            except Exception as e:
+                await db.rollback()
+                logger.error(f"Ошибка при создании профиля: {e}")
+                raise e
 
     @classmethod
     def generate_config_content(cls, private_key: str, ipv4: str) -> str:
         """
-        Формирует строку конфигурации AmneziaWG.
+        Формирует строку конфигурации .conf для клиента AmneziaWG.
         """
         config = f"""[Interface]
 PrivateKey = {private_key}
@@ -285,6 +276,9 @@ AllowedIPs = 0.0.0.0/0
 
     @classmethod
     def generate_qr_code(cls, content: str) -> bytes:
+        """
+        Генерирует QR-код из строки контента (PNG).
+        """
         import segno
         import io
         qr = segno.make(content, error='M')
@@ -294,6 +288,9 @@ AllowedIPs = 0.0.0.0/0
 
     @staticmethod
     def format_bytes(size_bytes: int) -> str:
+        """
+        Человекочитаемый формат байтов.
+        """
         import math
         if size_bytes == 0:
             return "0 Б"
@@ -305,6 +302,9 @@ AllowedIPs = 0.0.0.0/0
 
     @classmethod
     async def get_monthly_usage(cls, db: aiosqlite.Connection, user_id: int) -> list[dict]:
+        """
+        Потребление трафика за месяц для всех профилей пользователя.
+        """
         await cls.check_and_perform_monthly_reset(db)
         all_stats = await cls.get_all_peers_stats()
         query = "SELECT name, public_key, ipv4_address, monthly_offset_bytes FROM vpn_profiles WHERE user_id = ?"
@@ -327,6 +327,9 @@ AllowedIPs = 0.0.0.0/0
 
     @classmethod
     async def check_and_perform_monthly_reset(cls, db: aiosqlite.Connection):
+        """
+        Ежемесячный сброс счетчиков трафика (через оффсеты).
+        """
         from datetime import datetime
         now = datetime.now()
         current_month_key = now.strftime("%Y-%m")
