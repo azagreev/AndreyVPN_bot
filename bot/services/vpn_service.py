@@ -1,5 +1,6 @@
 import asyncio
 import shutil
+import aiosqlite
 from loguru import logger
 
 
@@ -130,6 +131,19 @@ AllowedIPs = 0.0.0.0/0
         return config
 
     @classmethod
+    def generate_qr_code(cls, content: str) -> bytes:
+        """
+        Генерирует QR-код из строки контента и возвращает его в виде байтов (PNG).
+        """
+        import segno
+        import io
+        
+        qr = segno.make(content, error='M')
+        out = io.BytesIO()
+        qr.save(out, kind='png', scale=10)
+        return out.getvalue()
+
+    @classmethod
     async def sync_peer_with_server(cls, public_key: str, ipv4: str) -> bool:
         """
         Добавляет публичный ключ пира в конфигурацию сервера WireGuard в реальном времени.
@@ -158,6 +172,174 @@ AllowedIPs = 0.0.0.0/0
         except Exception as e:
             logger.exception(f"Непредвиденная ошибка при синхронизации пира: {e}")
             return False
+
+    @classmethod
+    async def get_all_peers_stats(cls) -> dict[str, dict[str, int]]:
+        """
+        Получает статистику трафика (rx/tx) для всех пиров с интерфейса.
+        Использует 'wg show <interface> dump' для машиночитаемого вывода.
+        
+        :return: Словарь {public_key: {'rx': int, 'tx': int, 'total': int}}
+        """
+        from bot.core.config import settings
+        
+        if not cls._check_wg_installed():
+            return {}
+
+        try:
+            command = ["wg", "show", settings.wg_interface, "dump"]
+            process = await asyncio.create_subprocess_exec(
+                *command,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            stdout, stderr = await process.communicate()
+            
+            if process.returncode != 0:
+                logger.error(f"Ошибка при получении статистики с интерфейса: {stderr.decode()}")
+                return {}
+
+            stats = {}
+            lines = stdout.decode().strip().split('\n')
+            # Первая строка - это данные самого интерфейса, пропускаем её
+            for line in lines[1:]:
+                parts = line.split('\t')
+                if len(parts) >= 8:
+                    pub_key = parts[0]
+                    rx = int(parts[6])
+                    tx = int(parts[7])
+                    stats[pub_key] = {
+                        'rx': rx,
+                        'tx': tx,
+                        'total': rx + tx
+                    }
+            return stats
+        except Exception as e:
+            logger.exception(f"Непредвиденная ошибка при получении статистики: {e}")
+            return {}
+
+    @classmethod
+    async def get_server_status(cls) -> dict:
+        """
+        Проверяет статус VPN интерфейса и возвращает информацию.
+        """
+        from bot.core.config import settings
+        
+        if not cls._check_wg_installed():
+            return {"status": "error", "message": "wg not installed"}
+
+        try:
+            # Проверяем наличие интерфейса через ip link
+            command = ["ip", "link", "show", settings.wg_interface]
+            process = await asyncio.create_subprocess_exec(
+                *command,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            stdout, _ = await process.communicate()
+            
+            is_up = "UP" in stdout.decode() if process.returncode == 0 else False
+            
+            # Получаем количество активных пиров
+            peers = await cls.get_all_peers_stats()
+            
+            return {
+                "status": "online" if is_up else "offline",
+                "interface": settings.wg_interface,
+                "active_peers_count": len(peers)
+            }
+        except Exception as e:
+            logger.error(f"Ошибка при проверке статуса сервера: {e}")
+            return {"status": "error", "message": str(e)}
+
+    @staticmethod
+    def format_bytes(size_bytes: int) -> str:
+        """
+        Форматирует байты в человекочитаемый вид (KB, MB, GB).
+        """
+        import math
+        if size_bytes == 0:
+            return "0 Б"
+        size_name = ("Б", "КБ", "МБ", "ГБ", "ТБ")
+        i = int(math.floor(math.log(size_bytes, 1024)))
+        p = math.pow(1024, i)
+        s = round(size_bytes / p, 2)
+        return f"{s} {size_name[i]}"
+
+    @classmethod
+    async def get_monthly_usage(cls, db: aiosqlite.Connection, user_id: int) -> list[dict]:
+        """
+        Вычисляет потребление трафика за текущий месяц для всех профилей пользователя.
+        Учитывает monthly_offset_bytes для имитации ежемесячного сброса.
+        """
+        # 1. Сначала проверяем, не пора ли сделать глобальный сброс месяца
+        await cls.check_and_perform_monthly_reset(db)
+        
+        # 2. Получаем актуальные данные с сервера
+        all_stats = await cls.get_all_peers_stats()
+        
+        # 3. Достаем профили пользователя с их оффсетами
+        query = "SELECT name, public_key, ipv4_address, monthly_offset_bytes FROM vpn_profiles WHERE user_id = ?"
+        results = []
+        async with db.execute(query, (user_id,)) as cursor:
+            async for row in cursor:
+                pub_key = row['public_key']
+                offset = row['monthly_offset_bytes'] or 0
+                
+                stats = all_stats.get(pub_key, {'rx': 0, 'tx': 0, 'total': 0})
+                
+                # Если счетчик WG сбросился (меньше оффсета), 
+                # то оффсет стал невалидным (нужно либо обнулять, либо усложнять логику).
+                # Для простоты: если WG < offset, считаем что offset = 0 (сервер перезагрузили).
+                current_total = stats['total']
+                if current_total < offset:
+                     monthly_bytes = current_total
+                else:
+                     monthly_bytes = current_total - offset
+                
+                results.append({
+                    "name": row['name'],
+                    "ip": row['ipv4_address'],
+                    "rx": stats['rx'],
+                    "tx": stats['tx'],
+                    "monthly_total": monthly_bytes
+                })
+        return results
+
+    @classmethod
+    async def check_and_perform_monthly_reset(cls, db: aiosqlite.Connection):
+        """
+        Проверяет, наступил ли новый месяц. Если да — обновляет monthly_offset_bytes.
+        """
+        from datetime import datetime
+        now = datetime.now()
+        current_month_key = now.strftime("%Y-%m")
+        
+        # Проверяем последний сброс в таблице configs
+        async with db.execute("SELECT value FROM configs WHERE key = 'last_traffic_reset'", ()) as cursor:
+            row = await cursor.fetchone()
+            last_reset = row[0] if row else None
+            
+        if last_reset != current_month_key:
+            logger.info(f"Наступил новый месяц ({current_month_key}). Выполняю сброс счетчиков...")
+            
+            # Получаем текущую статистику со всех пиров
+            all_stats = await cls.get_all_peers_stats()
+            
+            # Обновляем оффсеты для всех профилей в БД
+            for pub_key, stat in all_stats.items():
+                await db.execute(
+                    "UPDATE vpn_profiles SET monthly_offset_bytes = ? WHERE public_key = ?",
+                    (stat['total'], pub_key)
+                )
+            
+            # Обновляем дату последнего сброса
+            await db.execute(
+                "INSERT OR REPLACE INTO configs (key, value) VALUES ('last_traffic_reset', ?)",
+                (current_month_key,)
+            )
+            await db.commit()
+            logger.success("Ежемесячный сброс счетчиков завершен.")
 
     @classmethod
     async def create_profile(cls, user_id: int, name: str) -> dict:

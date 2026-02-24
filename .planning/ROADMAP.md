@@ -4,9 +4,9 @@
 
 - [x] **Phase 1: Foundation & Data Layer** - Establish project structure and persistence.
 - [x] **Phase 2: Bot Core & Access Control** - Implement onboarding, CAPTCHA, and admin approval.
-- [ ] **Phase 3: VPN Service Integration** - Implement AmneziaWG profile generation logic.
-- [ ] **Phase 4: Profile Delivery Workflow** - Handle VPN requests and deliver QR/conf files.
-- [ ] **Phase 5: Monitoring & Status** - Implement traffic tracking and server health checks.
+- [x] **Phase 3: VPN Service Integration** - Implement AmneziaWG profile generation logic.
+- [x] **Phase 4: Profile Delivery Workflow** - Handle VPN requests and deliver QR/conf files.
+- [x] **Phase 5: Monitoring & Status** - Implement traffic tracking and server health checks.
 
 ## Phase Details
 
@@ -48,7 +48,7 @@
   1. Approved users can request a new VPN configuration via the bot UI.
   2. Admin must approve each specific configuration request before it is issued.
   3. User receives both a QR code image and a `.conf` file upon approval.
-**Plans**: TBD
+**Plans**: [04-01-PLAN.md](phases/04-profile-delivery/04-01-PLAN.md)
 
 ### Phase 5: Monitoring & Status
 **Goal**: Visibility into server health and bandwidth usage.
@@ -58,7 +58,7 @@
   1. Users can view their current month's traffic consumption via a `/stats` command.
   2. Admin can check the "Server Status" (AmneziaWG interface Up/Down) via the bot.
   3. Traffic counters reset to zero automatically at 00:00 on the 1st of every month.
-**Plans**: TBD
+**Plans**: [05-01-PLAN.md](phases/05-monitoring-status/05-01-PLAN.md)
 
 ## Progress Tracking
 
@@ -66,9 +66,9 @@
 |-------|----------------|--------|-----------|
 | 1. Foundation & Data Layer | 2/2 | Completed | 2026-02-24 |
 | 2. Bot Core & Access Control | 1/1 | Completed | 2026-02-24 |
-| 3. VPN Service Integration | 0/1 | Not started | - |
-| 4. Profile Delivery Workflow | 0/1 | Not started | - |
-| 5. Monitoring & Status | 0/1 | Not started | - |
+| 3. VPN Service Integration | 2/2 | Completed | 2026-02-24 |
+| 4. Profile Delivery Workflow | 1/1 | Completed | 2026-02-24 |
+| 5. Monitoring & Status | 1/1 | Completed | 2026-02-24 |
 
 ---
 *Last updated: 2026-02-24*

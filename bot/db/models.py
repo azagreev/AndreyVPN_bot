@@ -47,6 +47,7 @@ CREATE TABLE IF NOT EXISTS vpn_profiles (
     private_key TEXT,
     public_key TEXT,
     ipv4_address TEXT,
+    monthly_offset_bytes INTEGER DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users (telegram_id)
 );

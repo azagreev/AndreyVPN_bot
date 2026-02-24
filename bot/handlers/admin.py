@@ -39,8 +39,14 @@ async def handle_approve(callback_query: CallbackQuery, callback_data: ApproveCa
     )
     
     # Уведомляем пользователя
+    from bot.handlers.profiles import get_main_keyboard
     try:
-        await bot.send_message(user_id, "✅ Ваш доступ был одобрен администратором! Теперь вы можете пользоваться всеми функциями бота.")
+        await bot.send_message(
+            user_id, 
+            "✅ Ваш доступ был одобрен администратором!\n"
+            "Теперь вы можете запросить свой первый VPN-профиль. 🛡️",
+            reply_markup=get_main_keyboard()
+        )
     except Exception as e:
         print(f"Не удалось уведомить пользователя {user_id}: {e}")
 

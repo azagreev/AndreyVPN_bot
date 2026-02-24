@@ -24,7 +24,12 @@ async def cmd_start(message: Message, db: aiosqlite.Connection, state: FSMContex
     
     if row:
         if row['is_approved']:
-            await message.answer("С возвращением! Бот активен и готов к работе. 🚀")
+            from bot.handlers.profiles import get_main_keyboard
+            await message.answer(
+                "С возвращением! Бот активен и готов к работе. 🚀\n\n"
+                "Используйте кнопку ниже для перехода в меню:",
+                reply_markup=get_main_keyboard()
+            )
             return
         else:
             await message.answer("Ваша заявка все еще находится на рассмотрении. Пожалуйста, ожидайте. ⏳")
