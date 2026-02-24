@@ -9,7 +9,7 @@ ignore = ["E402", "E501"]
 
 [tool.mypy]
 python_version = "3.12"
-files = ["bot/core", "bot/db", "bot/services", "scripts/migrate_to_fernet.py", "tests"]
+files = ["bot/core", "bot/db", "bot/services", "bot/handlers", "bot/middlewares", "scripts/migrate_to_fernet.py", "tests"]
 warn_unused_configs = true
 check_untyped_defs = true
 warn_return_any = true
@@ -18,6 +18,12 @@ disallow_incomplete_defs = false
 disallow_untyped_defs = false
 ignore_missing_imports = true
 exclude = "(^venv/|^\\.venv/)"
+
+# aiogram handlers receive guaranteed non-None from_user/message from the dispatcher,
+# but the type stubs declare them as Optional. Suppress union-attr for handler modules.
+[[tool.mypy.overrides]]
+module = ["bot.handlers.*", "bot.middlewares.*"]
+disable_error_code = ["union-attr"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

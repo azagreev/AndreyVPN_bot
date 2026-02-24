@@ -1,7 +1,8 @@
-from aiogram import Router, F, Bot
-from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
-from aiogram.filters.callback_data import CallbackData
 import aiosqlite
+from aiogram import Bot, F, Router
+from aiogram.filters.callback_data import CallbackData
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
+from loguru import logger
 
 router = Router()
 
@@ -19,7 +20,7 @@ def get_admin_keyboard(user_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 @router.callback_query(ApproveCallback.filter(F.action == "accept"))
-async def handle_approve(callback_query: CallbackQuery, callback_data: ApproveCallback, db: aiosqlite.Connection, bot: Bot):
+async def handle_approve(callback_query: CallbackQuery, callback_data: ApproveCallback, db: aiosqlite.Connection, bot: Bot) -> None:
     user_id = callback_data.user_id
     
     # Обновляем статус пользователя
@@ -45,10 +46,10 @@ async def handle_approve(callback_query: CallbackQuery, callback_data: ApproveCa
             reply_markup=get_main_keyboard()
         )
     except Exception as e:
-        print(f"Не удалось уведомить пользователя {user_id}: {e}")
+        logger.error(f"Не удалось уведомить пользователя {user_id}: {e}")
 
 @router.callback_query(ApproveCallback.filter(F.action == "reject"))
-async def handle_reject(callback_query: CallbackQuery, callback_data: ApproveCallback, db: aiosqlite.Connection, bot: Bot):
+async def handle_reject(callback_query: CallbackQuery, callback_data: ApproveCallback, db: aiosqlite.Connection, bot: Bot) -> None:
     user_id = callback_data.user_id
     
     # Обновляем статус в таблице заявок
@@ -67,4 +68,4 @@ async def handle_reject(callback_query: CallbackQuery, callback_data: ApproveCal
     try:
         await bot.send_message(user_id, "❌ Ваша заявка на доступ была отклонена администратором.")
     except Exception as e:
-        print(f"Не удалось уведомить пользователя {user_id}: {e}")
+        logger.error(f"Не удалось уведомить пользователя {user_id}: {e}")
