@@ -56,5 +56,3 @@ class AccessControlMiddleware(BaseMiddleware):
             await event.answer("🚫 Доступ ограничен. Ожидайте одобрения администратором.")
         elif isinstance(event, CallbackQuery):
             await event.answer("🚫 Доступ ограничен.", show_alert=True)
-        
-        return
