@@ -1,16 +1,17 @@
+import os
+
+# Устанавливаем тестовые переменные окружения ДО импорта settings,
+# чтобы pydantic-settings мог их подхватить при инициализации.
+os.environ.setdefault("BOT_TOKEN", "1234567890:test_token_for_pytest")
+os.environ.setdefault("ADMIN_ID", "999")
+os.environ.setdefault("ENCRYPTION_KEY", "dGVzdF9lbmNyeXB0aW9uX2tleV8zMl9ieXRlc18=")
+
 from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
-from typing import Callable
-from unittest.mock import AsyncMock, MagicMock
 
 import aiosqlite
 import pytest
 import pytest_asyncio
-from aiogram import Bot
-from aiogram.fsm.context import FSMContext
-from aiogram.fsm.storage.base import StorageKey
-from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.types import CallbackQuery, Chat, Message, User
 from cryptography.fernet import Fernet
 from pydantic import SecretStr
 
@@ -58,63 +59,78 @@ async def db_connection(prepared_db: Path) -> AsyncIterator[aiosqlite.Connection
 
 
 # ---------------------------------------------------------------------------
-# aiogram mock fixtures for handler / middleware testing
+# Вспомогательные фабрики и фикстуры для юнит/интеграционных тестов
 # ---------------------------------------------------------------------------
+
+import pytest
+from unittest.mock import AsyncMock, MagicMock
 
 
 @pytest.fixture
-def mock_bot() -> AsyncMock:
-    bot = AsyncMock(spec=Bot)
+def admin_id(monkeypatch):
+    """Фиксированный admin_id для тестов."""
+    from bot.core.config import settings
+    monkeypatch.setattr(settings, "admin_id", 999, raising=False)
+    return 999
+
+
+def make_user(user_id: int, username: str = None, full_name: str = "Test User"):
+    user = MagicMock()
+    user.id = user_id
+    user.username = username
+    user.full_name = full_name
+    return user
+
+
+def make_message(user_id: int, text: str = "", username: str = None, full_name: str = "Test User"):
+    message = MagicMock()
+    message.from_user = make_user(user_id, username, full_name)
+    message.text = text
+    message.answer = AsyncMock()
+    return message
+
+
+def make_callback(user_id: int, data: str = "", message_text: str = "Test"):
+    callback = MagicMock()
+    callback.from_user = make_user(user_id)
+    callback.data = data
+    callback.message = MagicMock()
+    callback.message.text = message_text
+    callback.message.edit_text = AsyncMock()
+    callback.message.edit_reply_markup = AsyncMock()
+    callback.message.answer = AsyncMock()
+    callback.answer = AsyncMock()
+    return callback
+
+
+def make_bot():
+    bot = AsyncMock()
     bot.send_message = AsyncMock()
     bot.send_photo = AsyncMock()
     bot.send_document = AsyncMock()
     return bot
 
 
-@pytest.fixture
-def mock_user() -> User:
-    return User(id=12345, is_bot=False, first_name="Test", username="testuser")
+def make_state():
+    state = AsyncMock()
+    state.get_state = AsyncMock(return_value=None)
+    state.get_data = AsyncMock(return_value={})
+    state.update_data = AsyncMock()
+    state.set_state = AsyncMock()
+    state.clear = AsyncMock()
+    return state
 
 
 @pytest.fixture
-def admin_user() -> User:
-    return User(id=settings.admin_id, is_bot=False, first_name="Admin", username="admin")
-
-
-def _make_message(user: User, text: str = "") -> AsyncMock:
-    msg = AsyncMock(spec=Message)
-    msg.from_user = user
-    msg.text = text
-    msg.chat = MagicMock(spec=Chat)
-    msg.chat.id = user.id
-    msg.answer = AsyncMock()
-    return msg
-
-
-def _make_callback_query(user: User, data: str = "", message: AsyncMock | None = None) -> AsyncMock:
-    cq = AsyncMock(spec=CallbackQuery)
-    cq.from_user = user
-    cq.data = data
-    cq.answer = AsyncMock()
-    cq.message = message or _make_message(user)
-    cq.message.edit_text = AsyncMock()
-    cq.message.answer = AsyncMock()
-    cq.message.text = ""
-    return cq
+def bot():
+    return make_bot()
 
 
 @pytest.fixture
-def make_message() -> Callable[..., AsyncMock]:
-    return _make_message
+def mock_message():
+    return make_message
 
 
 @pytest.fixture
-def make_callback_query() -> Callable[..., AsyncMock]:
-    return _make_callback_query
-
-
-@pytest_asyncio.fixture
-async def fsm_context() -> FSMContext:
-    storage = MemoryStorage()
-    key = StorageKey(bot_id=1, chat_id=12345, user_id=12345)
-    return FSMContext(storage=storage, key=key)
+def mock_callback():
+    return make_callback

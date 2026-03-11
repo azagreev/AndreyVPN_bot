@@ -33,6 +33,14 @@ class Settings(BaseSettings):
     h3: int = 13572468
     h4: int = 24681357
 
+    # Логирование
+    log_level: str = "INFO"   # DEBUG | INFO | WARNING | ERROR
+    log_path: str = "logs"    # директория для файлов логов
+
+    # FSM Storage (опционально — Redis для production)
+    # Если не задан, используется MemoryStorage (данные теряются при рестарте)
+    redis_url: str | None = None  # пример: redis://localhost:6379/0
+
     # Настройка загрузки из .env файла
     model_config = SettingsConfigDict(
         env_file=".env",

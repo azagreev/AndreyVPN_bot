@@ -18,11 +18,8 @@ class DbMiddleware(BaseMiddleware):
     ) -> Any:
         # Открываем асинхронное соединение с базой данных
         async with aiosqlite.connect(settings.db_path) as db:
-            # Устанавливаем фабрику строк для удобного доступа к полям через названия
             db.row_factory = aiosqlite.Row
-            
-            # Передаем объект соединения в данные, доступные в хендлерах
+            # Включаем foreign keys для каждого соединения (SQLite PRAGMA действует per-connection)
+            await db.execute("PRAGMA foreign_keys = ON")
             data["db"] = db
-            
-            # Продолжаем обработку события
             return await handler(event, data)

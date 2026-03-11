@@ -10,6 +10,7 @@ from cryptography.fernet import Fernet, InvalidToken
 from loguru import logger
 
 from bot.core.config import settings
+from bot.core.logging import log_wg_command, log_wg_result
 
 
 class VPNService:
@@ -218,23 +219,20 @@ class VPNService:
             logger.error(str(exc))
             return False
 
+        args = [binary, "set", settings.wg_interface, "peer", public_key, "allowed-ips", f"{ipv4}/32"]
+        log_wg_command(args)
         try:
             process = await asyncio.create_subprocess_exec(
-                binary,
-                "set",
-                settings.wg_interface,
-                "peer",
-                public_key,
-                "allowed-ips",
-                f"{ipv4}/32",
+                *args,
                 stderr=asyncio.subprocess.PIPE,
             )
             _, stderr = await process.communicate()
+            err = stderr.decode("utf-8", errors="replace").strip()
+            log_wg_result(process.returncode, err)
             if process.returncode != 0:
-                err = stderr.decode("utf-8", errors="replace").strip()
                 logger.error(f"Sync error: {err}")
                 return False
-            return process.returncode == 0
+            return True
         except OSError as exc:
             logger.error(f"Sync error: {exc}")
             return False
@@ -340,6 +338,68 @@ AllowedIPs = 0.0.0.0/0
                     "monthly_total": monthly_total,
                 })
         return results
+
+    @classmethod
+    async def remove_peer_from_server(cls, public_key: str) -> bool:
+        try:
+            binary = cls._resolve_wg_binary()
+        except RuntimeError as exc:
+            logger.error(str(exc))
+            return False
+
+        args = [binary, "set", settings.wg_interface, "peer", public_key, "remove"]
+        log_wg_command(args)
+        try:
+            process = await asyncio.create_subprocess_exec(
+                *args,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            _, stderr = await process.communicate()
+            err = stderr.decode("utf-8", errors="replace").strip()
+            log_wg_result(process.returncode, err)
+            if process.returncode != 0:
+                logger.error(f"Failed to remove peer: {err}")
+                return False
+            return True
+        except OSError as exc:
+            logger.error(f"Failed to remove peer: {exc}")
+            return False
+
+    @classmethod
+    async def delete_profile(cls, profile_id: int) -> bool:
+        """Удаляет профиль из WireGuard и базы данных."""
+        async with aiosqlite.connect(settings.db_path) as db:
+            cursor = await db.execute(
+                "SELECT public_key FROM vpn_profiles WHERE id = ?",
+                (profile_id,),
+            )
+            row = await cursor.fetchone()
+            if not row:
+                return False
+
+            public_key = row[0]
+            await cls.remove_peer_from_server(public_key)
+
+            await db.execute("DELETE FROM vpn_profiles WHERE id = ?", (profile_id,))
+            await db.commit()
+            return True
+
+    @classmethod
+    async def get_profile_config(cls, profile_id: int) -> dict | None:
+        """Восстанавливает конфиг профиля из базы данных."""
+        async with aiosqlite.connect(settings.db_path) as db:
+            cursor = await db.execute(
+                "SELECT name, private_key, ipv4_address FROM vpn_profiles WHERE id = ?",
+                (profile_id,),
+            )
+            row = await cursor.fetchone()
+            if not row:
+                return None
+
+            name, encrypted_key, ipv4 = row
+            private_key = cls.decrypt_data(encrypted_key)
+            config = cls.generate_config_content(private_key, ipv4)
+            return {"name": name, "config": config, "ipv4": ipv4}
 
     @classmethod
     async def get_all_peers_stats(cls) -> dict[str, dict[str, int]]:
