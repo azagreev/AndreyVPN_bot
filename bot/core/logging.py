@@ -90,7 +90,7 @@ def setup_logging(log_level: str = "INFO", log_path: str = "logs") -> None:
         compression="gz",
         encoding="utf-8",
         backtrace=True,
-        diagnose=True,
+        diagnose=log_level.upper() == "DEBUG",
         filter=_add_ctx_default,
     )
 

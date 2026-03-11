@@ -12,12 +12,17 @@ from aiogram.filters.callback_data import CallbackData
 from loguru import logger
 import aiosqlite
 
-from bot.handlers.user.menu import BTN_PROFILES
+from bot.keyboards.user import BTN_PROFILES
 from bot.services.vpn_service import VPNService
 from bot.core.config import settings
 from bot.core.logging import audit
+from bot.db import repository
+from bot.handlers.admin.users import get_issue_vpn_keyboard
 
 router = Router()
+
+# Rate limiting: предотвращаем многократный спам запросами VPN
+_pending_vpn_requests: set[int] = set()
 
 
 class ProfileAction(CallbackData, prefix="prof"):
@@ -60,11 +65,7 @@ def confirm_delete_keyboard(profile_id: int) -> InlineKeyboardMarkup:
 
 
 async def _fetch_profiles(db: aiosqlite.Connection, user_id: int) -> list:
-    cursor = await db.execute(
-        "SELECT id, name, ipv4_address FROM vpn_profiles WHERE user_id = ? ORDER BY created_at",
-        (user_id,),
-    )
-    return [dict(r) for r in await cursor.fetchall()]
+    return await repository.get_profiles(db, user_id)
 
 
 @router.message(F.text == BTN_PROFILES)
@@ -92,17 +93,13 @@ async def handle_download_conf(callback: CallbackQuery, callback_data: ProfileAc
     profile_id = callback_data.profile_id
     user_id = callback.from_user.id
 
-    # Проверяем владельца — предотвращаем скачивание чужого конфига
-    cursor = await db.execute(
-        "SELECT user_id FROM vpn_profiles WHERE id = ?", (profile_id,)
-    )
-    row = await cursor.fetchone()
-    if not row or row["user_id"] != user_id:
+    owner = await repository.get_profile_owner(db, profile_id)
+    if owner != user_id:
         await callback.answer("Профиль не найден.", show_alert=True)
         return
 
     await callback.answer("Генерирую конфиг...")
-    result = await VPNService.get_profile_config(profile_id)
+    result = await VPNService.get_profile_config(db, profile_id)
     if not result:
         return
 
@@ -119,17 +116,13 @@ async def handle_show_qr(callback: CallbackQuery, callback_data: ProfileAction, 
     profile_id = callback_data.profile_id
     user_id = callback.from_user.id
 
-    # Проверяем владельца — предотвращаем просмотр чужого QR
-    cursor = await db.execute(
-        "SELECT user_id FROM vpn_profiles WHERE id = ?", (profile_id,)
-    )
-    row = await cursor.fetchone()
-    if not row or row["user_id"] != user_id:
+    owner = await repository.get_profile_owner(db, profile_id)
+    if owner != user_id:
         await callback.answer("Профиль не найден.", show_alert=True)
         return
 
     await callback.answer("Генерирую QR-код...")
-    result = await VPNService.get_profile_config(profile_id)
+    result = await VPNService.get_profile_config(db, profile_id)
     if not result:
         return
 
@@ -155,18 +148,16 @@ async def handle_delete_confirm(callback: CallbackQuery, callback_data: ProfileA
     profile_id = callback_data.profile_id
     user_id = callback.from_user.id
 
-    cursor = await db.execute("SELECT user_id FROM vpn_profiles WHERE id = ?", (profile_id,))
-    row = await cursor.fetchone()
-    if not row or row["user_id"] != user_id:
+    owner = await repository.get_profile_owner(db, profile_id)
+    if owner != user_id:
         await callback.answer("Профиль не найден.", show_alert=True)
         return
 
     # Сохраняем имя профиля для лога до удаления
-    cursor = await db.execute("SELECT name FROM vpn_profiles WHERE id = ?", (profile_id,))
-    profile_row = await cursor.fetchone()
-    profile_name = profile_row["name"] if profile_row else str(profile_id)
+    row = await repository.get_profile_for_config(db, profile_id)
+    profile_name = row["name"] if row else str(profile_id)
 
-    success = await VPNService.delete_profile(profile_id)
+    success = await VPNService.delete_profile(db, profile_id)
     if not success:
         logger.error("[VPN] Ошибка удаления профиля | user_id={} profile_id={}", user_id, profile_id)
         await callback.answer("❌ Ошибка при удалении профиля.", show_alert=True)
@@ -203,6 +194,12 @@ async def handle_delete_cancel(callback: CallbackQuery, callback_data: ProfileAc
 async def handle_vpn_request(callback: CallbackQuery, bot: Bot):
     user = callback.from_user
 
+    user_id = user.id
+    if user_id in _pending_vpn_requests:
+        await callback.answer("⏳ Запрос уже отправлен, ожидайте ответа администратора.", show_alert=True)
+        return
+    _pending_vpn_requests.add(user_id)
+
     username = f"@{user.username}" if user.username else "без username"
     logger.info("[VPN] Пользователь запросил профиль | user_id={} username={}", user.id, username)
 
@@ -211,8 +208,6 @@ async def handle_vpn_request(callback: CallbackQuery, bot: Bot):
         "⏳ Запрос на новый VPN профиль отправлен администратору.\n"
         "Вы получите уведомление, когда профиль будет готов."
     )
-
-    from bot.handlers.admin.users import get_issue_vpn_keyboard
 
     try:
         await bot.send_message(

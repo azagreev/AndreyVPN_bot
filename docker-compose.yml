@@ -1,0 +1,71 @@
+version: "3.9"
+
+services:
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: andreyvpn_bot
+    restart: unless-stopped
+
+    environment:
+      # Переменные можно задать здесь или через .env файл
+      - BOT_TOKEN=${BOT_TOKEN}
+      - ADMIN_ID=${ADMIN_ID}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY}
+      - SERVER_PUB_KEY=${SERVER_PUB_KEY}
+      - SERVER_ENDPOINT=${SERVER_ENDPOINT}
+      - DB_PATH=/app/data/bot_data.db
+      - LOG_PATH=/app/logs
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - WG_INTERFACE=${WG_INTERFACE:-awg0}
+      - WG_CONTAINER_NAME=${WG_CONTAINER_NAME:-amneziawg}
+      - VPN_IP_RANGE=${VPN_IP_RANGE:-10.8.0.0/24}
+      - DNS_SERVERS=${DNS_SERVERS:-1.1.1.1, 8.8.8.8}
+      # Параметры обфускации AmneziaWG
+      - JC=${JC:-4}
+      - JMIN=${JMIN:-40}
+      - JMAX=${JMAX:-70}
+      - S1=${S1:-44}
+      - S2=${S2:-148}
+      - H1=${H1:-12345678}
+      - H2=${H2:-87654321}
+      - H3=${H3:-13572468}
+      - H4=${H4:-24681357}
+
+    volumes:
+      # Постоянное хранение БД и логов
+      - bot_data:/app/data
+      - bot_logs:/app/logs
+      # Docker socket — необходим для docker exec в AWG контейнер
+      - /var/run/docker.sock:/var/run/docker.sock
+
+    # Бот не открывает порты — только исходящие соединения к Telegram API
+    networks:
+      - vpn_network
+
+    depends_on:
+      - amneziawg
+
+  # Контейнер AmneziaWG уже запущен — описываем как external service
+  # Раскомментируй если хочешь управлять AWG через этот compose-файл
+  # amneziawg:
+  #   image: amnezia/amneziawg:2.0
+  #   container_name: amneziawg
+  #   ...
+
+  # Заглушка для depends_on — замени на реальный AWG сервис если нужно
+  amneziawg:
+    image: alpine:3.19
+    container_name: amneziawg
+    command: ["sh", "-c", "echo 'AmneziaWG placeholder - replace with real service' && tail -f /dev/null"]
+    networks:
+      - vpn_network
+
+volumes:
+  bot_data:
+  bot_logs:
+
+networks:
+  vpn_network:
+    driver: bridge

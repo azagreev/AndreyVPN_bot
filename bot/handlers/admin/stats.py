@@ -3,26 +3,16 @@ from aiogram.types import Message
 import aiosqlite
 
 from bot.filters.admin import AdminFilter
-from bot.handlers.admin.menu import BTN_STATS, BTN_SERVER
+from bot.keyboards.admin import BTN_STATS, BTN_SERVER
 from bot.services.vpn_service import VPNService
+from bot.db import repository
 
 router = Router()
 
 
 @router.message(F.text == BTN_STATS, AdminFilter())
 async def handle_stats(message: Message, db: aiosqlite.Connection):
-    # Все счётчики одним запросом вместо шести последовательных
-    cursor = await db.execute(
-        """SELECT
-            (SELECT COUNT(*) FROM users) AS total_users,
-            (SELECT COUNT(*) FROM users WHERE is_approved = 1) AS approved,
-            (SELECT COUNT(*) FROM approvals WHERE status = 'pending') AS pending,
-            (SELECT COUNT(*) FROM vpn_profiles) AS total_profiles,
-            (SELECT COUNT(*) FROM users WHERE DATE(registered_at) = DATE('now')) AS new_today,
-            (SELECT COUNT(*) FROM users WHERE DATE(registered_at) >= DATE('now', '-7 days')) AS new_week
-        """
-    )
-    row = await cursor.fetchone()
+    row = await repository.get_global_stats(db)
 
     await message.answer(
         f"📊 <b>Статистика</b>\n\n"

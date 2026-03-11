@@ -16,6 +16,7 @@ class Settings(BaseSettings):
 
     # Настройки AmneziaWG
     wg_interface: str = "awg0"
+    wg_container_name: str = ""  # Имя Docker-контейнера с AmneziaWG (если пусто — вызовы напрямую)
     wg_port: int = 51820
     server_pub_key: str = ""
     server_endpoint: str = ""

@@ -11,6 +11,9 @@ import aiosqlite
 
 from bot.core.config import settings
 from bot.core.logging import audit
+from bot.db import repository
+from bot.keyboards.user import get_user_keyboard
+from bot.keyboards.admin import get_admin_keyboard
 
 router = Router()
 
@@ -32,20 +35,19 @@ async def cmd_cancel(message: Message, state: FSMContext):
 
 @router.message(Command("start"))
 async def cmd_start(message: Message, db: aiosqlite.Connection, state: FSMContext):
-    from bot.handlers.user.menu import get_user_keyboard
-    from bot.handlers.admin.menu import get_admin_keyboard
-
     user_id = message.from_user.id
     username = f"@{message.from_user.username}" if message.from_user.username else "без username"
 
     if user_id == settings.admin_id:
-        cursor = await db.execute("SELECT telegram_id FROM users WHERE telegram_id = ?", (user_id,))
-        if not await cursor.fetchone():
-            await db.execute(
-                "INSERT OR IGNORE INTO users (telegram_id, username, full_name, is_admin, is_approved) VALUES (?, ?, ?, 1, 1)",
-                (user_id, message.from_user.username, message.from_user.full_name),
+        user = await repository.get_user(db, user_id)
+        if not user:
+            await repository.create_user(
+                db, user_id,
+                message.from_user.username,
+                message.from_user.full_name,
+                is_admin=True,
+                is_approved=True,
             )
-            await db.commit()
             logger.info("[STARTUP] Администратор добавлен в БД | user_id={} username={}", user_id, username)
         await message.answer(
             "👋 Добро пожаловать!\n\n"
@@ -54,8 +56,7 @@ async def cmd_start(message: Message, db: aiosqlite.Connection, state: FSMContex
         )
         return
 
-    cursor = await db.execute("SELECT is_approved FROM users WHERE telegram_id = ?", (user_id,))
-    row = await cursor.fetchone()
+    row = await repository.get_user(db, user_id)
 
     if row:
         if row["is_approved"]:
@@ -98,15 +99,8 @@ async def process_captcha(message: Message, db: aiosqlite.Connection, state: FSM
 
     await state.clear()
 
-    await db.execute(
-        "INSERT OR IGNORE INTO users (telegram_id, username, full_name, is_approved) VALUES (?, ?, ?, 0)",
-        (user_id, message.from_user.username, message.from_user.full_name),
-    )
-    await db.execute(
-        "INSERT INTO approvals (user_id, status) VALUES (?, 'pending')",
-        (user_id,),
-    )
-    await db.commit()
+    await repository.create_user(db, user_id, message.from_user.username, message.from_user.full_name)
+    await repository.create_approval(db, user_id)
 
     logger.info("[REGISTRATION] Капча пройдена, заявка создана | user_id={} username={}", user_id, username)
     audit("REGISTER", user_id=user_id, username=username)

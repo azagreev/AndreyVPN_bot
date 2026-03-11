@@ -18,6 +18,8 @@ class AccessControlMiddleware(BaseMiddleware):
         if not isinstance(event, (Message, CallbackQuery)):
             return await handler(event, data)
 
+        if event.from_user is None:
+            return await handler(event, data)
         user_id = event.from_user.id
 
         # Администратор всегда имеет доступ

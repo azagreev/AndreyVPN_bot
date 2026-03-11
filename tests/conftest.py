@@ -55,6 +55,7 @@ async def prepared_db(test_settings: Path) -> AsyncIterator[Path]:
 async def db_connection(prepared_db: Path) -> AsyncIterator[aiosqlite.Connection]:
     async with aiosqlite.connect(prepared_db) as db:
         db.row_factory = aiosqlite.Row
+        await db.execute("PRAGMA journal_mode = WAL")
         yield db
 
 

@@ -2,6 +2,7 @@ import asyncio
 import os
 import sys
 
+import aiosqlite
 from aiogram import Bot, Dispatcher
 from aiogram.enums import ParseMode
 from aiogram.client.default import DefaultBotProperties
@@ -17,8 +18,8 @@ from bot.middlewares.throttling_middleware import ThrottlingMiddleware
 from bot.handlers import setup_handlers
 
 
-async def main():
-    # Проверка .env до инициализации логирования, чтобы ошибка была видна
+def main() -> None:
+    # Проверка .env до инициализации логирования
     if not os.path.exists(".env"):
         print(
             "CRITICAL | [STARTUP] Файл .env не найден. "
@@ -29,24 +30,17 @@ async def main():
 
     setup_logging(log_level=settings.log_level, log_path=settings.log_path)
 
-    logger.info("[STARTUP] Инициализация | log_level={} log_path={}", settings.log_level, settings.log_path)
-    logger.debug("[STARTUP] Настройки загружены | interface={} ip_range={} admin_id={}",
-                 settings.wg_interface, settings.vpn_ip_range, settings.admin_id)
+    logger.info(
+        "[STARTUP] Инициализация | log_level={} log_path={}",
+        settings.log_level,
+        settings.log_path,
+    )
 
-    # Проверка ключа шифрования
     if not settings.encryption_key:
         logger.critical("[STARTUP] ENCRYPTION_KEY не задан — приватные ключи WireGuard не будут зашифрованы")
         sys.exit(1)
 
-    # Инициализация базы данных
-    try:
-        await init_db(settings.db_path)
-        logger.info("[STARTUP] База данных инициализирована | path={}", settings.db_path)
-    except Exception as e:
-        logger.critical("[STARTUP] Не удалось инициализировать базу данных: {}", e)
-        sys.exit(1)
-
-    # FSM Storage: Redis (если задан REDIS_URL) или MemoryStorage
+    # FSM Storage
     if settings.redis_url:
         try:
             from aiogram.fsm.storage.redis import RedisStorage
@@ -62,35 +56,59 @@ async def main():
             "Для production задайте REDIS_URL в .env"
         )
 
-    # Создание бота и диспетчера
     bot = Bot(
         token=settings.bot_token,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
     dp = Dispatcher(storage=storage)
 
-    # Middleware: порядок важен — DbMiddleware должна быть первой (AccessControl зависит от db)
-    dp.update.outer_middleware(DbMiddleware())
-    dp.update.outer_middleware(AccessControlMiddleware())
-    dp.update.outer_middleware(ThrottlingMiddleware(rate_limit=0.7))
+    # ── Lifecycle hooks ────────────────────────────────────────────────────────
+    async def on_startup() -> None:
+        # Инициализация БД
+        try:
+            await init_db(settings.db_path)
+            logger.info("[STARTUP] База данных инициализирована | path={}", settings.db_path)
+        except Exception as e:
+            logger.critical("[STARTUP] Не удалось инициализировать базу данных: {}", e)
+            sys.exit(1)
 
-    dp.include_router(setup_handlers())
+        # Открываем долгоживущее соединение
+        db = await aiosqlite.connect(settings.db_path)
+        db.row_factory = aiosqlite.Row
+        await db.execute("PRAGMA foreign_keys = ON")
+        await db.execute("PRAGMA journal_mode = WAL")
+        dp["db"] = db
 
-    logger.info("[STARTUP] Бот запущен | admin_id={} interface={}", settings.admin_id, settings.wg_interface)
+        # Регистрируем middlewares с готовым соединением
+        dp.update.outer_middleware(DbMiddleware(db))
+        dp.update.outer_middleware(AccessControlMiddleware())
+        dp.update.outer_middleware(ThrottlingMiddleware(rate_limit=0.7))
 
-    try:
-        await dp.start_polling(
-            bot,
-            allowed_updates=["message", "callback_query"],
-            drop_pending_updates=True,
+        dp.include_router(setup_handlers())
+        logger.info(
+            "[STARTUP] Бот запущен | admin_id={} interface={} container={}",
+            settings.admin_id,
+            settings.wg_interface,
+            settings.wg_container_name or "direct",
         )
-    finally:
-        await bot.session.close()
+
+    async def on_shutdown() -> None:
+        db: aiosqlite.Connection | None = dp.get("db")
+        if db:
+            await db.close()
+            logger.info("[SHUTDOWN] Соединение с БД закрыто")
         logger.info("[SHUTDOWN] Бот остановлен")
+
+    dp.startup.register(on_startup)
+    dp.shutdown.register(on_shutdown)
+
+    # run_polling — синхронная обёртка с правильным lifecycle management
+    dp.run_polling(
+        bot,
+        allowed_updates=["message", "callback_query"],
+        drop_pending_updates=True,
+    )
 
 
 if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except (KeyboardInterrupt, SystemExit):
-        pass
+    main()

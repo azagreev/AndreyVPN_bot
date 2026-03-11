@@ -1,25 +1,11 @@
 from aiogram import Router
 from aiogram.filters import Command
-from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton
+from aiogram.types import Message
 
 from bot.filters.admin import AdminFilter
+from bot.keyboards.admin import BTN_USERS, BTN_APPROVALS, BTN_STATS, BTN_SERVER, get_admin_keyboard
 
 router = Router()
-
-BTN_USERS = "👥 Пользователи"
-BTN_APPROVALS = "⏳ Заявки"
-BTN_STATS = "📊 Статистика"
-BTN_SERVER = "🖥️ Сервер"
-
-
-def get_admin_keyboard() -> ReplyKeyboardMarkup:
-    return ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text=BTN_USERS), KeyboardButton(text=BTN_APPROVALS)],
-            [KeyboardButton(text=BTN_STATS), KeyboardButton(text=BTN_SERVER)],
-        ],
-        resize_keyboard=True,
-    )
 
 
 @router.message(Command("admin"), AdminFilter())

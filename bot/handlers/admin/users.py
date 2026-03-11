@@ -13,10 +13,12 @@ from loguru import logger
 import aiosqlite
 
 from bot.filters.admin import AdminFilter
-from bot.handlers.admin.menu import BTN_USERS
+from bot.keyboards.admin import BTN_USERS
+from bot.keyboards.user import get_user_keyboard
 from bot.services.vpn_service import VPNService
 from bot.core.config import settings
 from bot.core.logging import audit
+from bot.db import repository
 
 router = Router()
 
@@ -111,57 +113,9 @@ def user_detail_keyboard(user_id: int, is_approved: bool, page: int) -> InlineKe
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
-async def _get_users_page(db: aiosqlite.Connection, page: int) -> tuple[list, int]:
-    cursor = await db.execute("SELECT COUNT(*) as cnt FROM users")
-    total = (await cursor.fetchone())["cnt"]
-
-    cursor = await db.execute(
-        "SELECT telegram_id, full_name, username, is_approved FROM users ORDER BY registered_at DESC LIMIT ? OFFSET ?",
-        (PAGE_SIZE, page * PAGE_SIZE),
-    )
-    rows = [dict(r) for r in await cursor.fetchall()]
-    return rows, total
-
-
-async def _build_user_detail_text(db: aiosqlite.Connection, user_id: int) -> tuple[str, bool]:
-    cursor = await db.execute(
-        "SELECT full_name, username, is_approved, registered_at FROM users WHERE telegram_id = ?",
-        (user_id,),
-    )
-    user = await cursor.fetchone()
-    if not user:
-        return "Пользователь не найден.", False
-
-    cursor = await db.execute(
-        "SELECT id, name, ipv4_address FROM vpn_profiles WHERE user_id = ?",
-        (user_id,),
-    )
-    profiles = await cursor.fetchall()
-
-    status = "✅ Одобрен" if user["is_approved"] else "❌ Заблокирован / Ожидает"
-    reg_date = user["registered_at"][:10] if user["registered_at"] else "—"
-    full_name = html.escape(user["full_name"]) if user["full_name"] else "—"
-    username = html.escape(user["username"]) if user["username"] else "—"
-
-    text = (
-        f"👤 <b>{full_name}</b>\n"
-        f"🔗 @{username}\n"
-        f"🆔 <code>{user_id}</code>\n"
-        f"📅 {reg_date}\n"
-        f"Статус: {status}\n\n"
-        f"🔑 Профили ({len(profiles)}):\n"
-    )
-    for p in profiles:
-        text += f"  • {html.escape(p['name'])} ({p['ipv4_address']})\n"
-    if not profiles:
-        text += "  Нет профилей\n"
-
-    return text, bool(user["is_approved"])
-
-
 @router.message(F.text == BTN_USERS, AdminFilter())
 async def handle_users(message: Message, db: aiosqlite.Connection):
-    rows, total = await _get_users_page(db, 0)
+    rows, total = await repository.get_users_page(db, 0, PAGE_SIZE)
     if not rows:
         await message.answer("👥 Нет зарегистрированных пользователей.")
         return
@@ -173,7 +127,7 @@ async def handle_users(message: Message, db: aiosqlite.Connection):
 
 @router.callback_query(UserAction.filter(F.action == "page"), AdminFilter())
 async def handle_users_page(callback: CallbackQuery, callback_data: UserAction, db: aiosqlite.Connection):
-    rows, total = await _get_users_page(db, callback_data.page)
+    rows, total = await repository.get_users_page(db, callback_data.page, PAGE_SIZE)
     await callback.message.edit_text(
         f"👥 <b>Пользователи</b> ({total} всего):",
         reply_markup=users_list_keyboard(rows, callback_data.page, total),
@@ -183,7 +137,7 @@ async def handle_users_page(callback: CallbackQuery, callback_data: UserAction, 
 
 @router.callback_query(UserAction.filter(F.action == "view"), AdminFilter())
 async def handle_user_view(callback: CallbackQuery, callback_data: UserAction, db: aiosqlite.Connection):
-    text, is_approved = await _build_user_detail_text(db, callback_data.user_id)
+    text, is_approved = await repository.get_user_detail(db, callback_data.user_id)
     await callback.message.edit_text(
         text,
         reply_markup=user_detail_keyboard(callback_data.user_id, is_approved, callback_data.page),
@@ -195,14 +149,13 @@ async def handle_user_view(callback: CallbackQuery, callback_data: UserAction, d
 async def handle_user_block(callback: CallbackQuery, callback_data: UserAction, db: aiosqlite.Connection, bot: Bot):
     user_id = callback_data.user_id
     admin_id = callback.from_user.id
-    await db.execute("UPDATE users SET is_approved = 0 WHERE telegram_id = ?", (user_id,))
-    await db.commit()
+    await repository.set_user_approved(db, user_id, False)
 
     logger.info("[ACCESS] Пользователь заблокирован | user_id={} by_admin={}", user_id, admin_id)
     audit("BLOCKED", user_id=user_id, by_admin=admin_id)
 
     await callback.answer("🚫 Пользователь заблокирован.")
-    text, is_approved = await _build_user_detail_text(db, user_id)
+    text, is_approved = await repository.get_user_detail(db, user_id)
     await callback.message.edit_text(
         text,
         reply_markup=user_detail_keyboard(user_id, is_approved, callback_data.page),
@@ -218,20 +171,17 @@ async def handle_user_block(callback: CallbackQuery, callback_data: UserAction, 
 async def handle_user_unblock(callback: CallbackQuery, callback_data: UserAction, db: aiosqlite.Connection, bot: Bot):
     user_id = callback_data.user_id
     admin_id = callback.from_user.id
-    await db.execute("UPDATE users SET is_approved = 1 WHERE telegram_id = ?", (user_id,))
-    await db.commit()
+    await repository.set_user_approved(db, user_id, True)
 
     logger.info("[ACCESS] Пользователь разблокирован | user_id={} by_admin={}", user_id, admin_id)
     audit("UNBLOCKED", user_id=user_id, by_admin=admin_id)
 
     await callback.answer("✅ Пользователь разблокирован.")
-    text, is_approved = await _build_user_detail_text(db, user_id)
+    text, is_approved = await repository.get_user_detail(db, user_id)
     await callback.message.edit_text(
         text,
         reply_markup=user_detail_keyboard(user_id, is_approved, callback_data.page),
     )
-
-    from bot.handlers.user.menu import get_user_keyboard
 
     try:
         await bot.send_message(
@@ -266,6 +216,10 @@ async def handle_vpn_reject(callback: CallbackQuery, callback_data: IssueVPN, bo
     await callback.answer("Запрос отклонён.")
     await callback.message.edit_text(callback.message.text + "\n\n❌ <b>Отклонено.</b>")
 
+    # Очищаем pending VPN requests для этого пользователя
+    from bot.handlers.user.profiles import _pending_vpn_requests
+    _pending_vpn_requests.discard(user_id)
+
     try:
         await bot.send_message(user_id, "❌ Ваш запрос на VPN профиль был отклонён.")
     except Exception as e:
@@ -275,17 +229,17 @@ async def handle_vpn_reject(callback: CallbackQuery, callback_data: IssueVPN, bo
 async def _issue_vpn_to_user(callback: CallbackQuery, user_id: int, db: aiosqlite.Connection, bot: Bot):
     admin_id = callback.from_user.id
     try:
-        cursor = await db.execute(
-            "SELECT COUNT(*) as cnt FROM vpn_profiles WHERE user_id = ?",
-            (user_id,),
-        )
-        cnt = (await cursor.fetchone())["cnt"]
+        cnt = await repository.count_user_profiles(db, user_id)
         profile_name = f"VPN_{user_id}_{cnt + 1}"
 
         logger.info("[VPN] Создание профиля | user_id={} profile={} by_admin={}", user_id, profile_name, admin_id)
-        result = await VPNService.create_profile(user_id, profile_name)
+        result = await VPNService.create_profile(db, user_id, profile_name)
         logger.info("[VPN] Профиль создан | user_id={} profile={} ip={} synced={}", user_id, profile_name, result["ipv4"], result["synced"])
         audit("VPN_ISSUED", user_id=user_id, profile=profile_name, ip=result["ipv4"], by_admin=admin_id)
+
+        # Очищаем pending VPN requests для этого пользователя
+        from bot.handlers.user.profiles import _pending_vpn_requests
+        _pending_vpn_requests.discard(user_id)
 
         if not result["synced"]:
             logger.warning("[VPN] Peer не синхронизирован с WireGuard | user_id={} profile={} ip={}", user_id, profile_name, result["ipv4"])

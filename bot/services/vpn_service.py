@@ -11,11 +11,15 @@ from loguru import logger
 
 from bot.core.config import settings
 from bot.core.logging import log_wg_command, log_wg_result
+from bot.db import repository
 
 
 class VPNService:
     """
     Сервис для управления VPN-профилями с поддержкой AmneziaWG и Fernet-шифрования.
+
+    Все методы, требующие доступа к БД, принимают db: aiosqlite.Connection —
+    соединение управляется снаружи (через DbMiddleware или lifecycle hooks).
     """
 
     _fernet: Fernet | None = None
@@ -70,23 +74,36 @@ class VPNService:
 
     @staticmethod
     def _resolve_wg_binary() -> str:
+        """Находит бинарник awg или wg в PATH."""
         awg_binary = shutil.which("awg")
         if awg_binary:
             return awg_binary
-
         wg_binary = shutil.which("wg")
         if wg_binary:
             return wg_binary
-
         raise RuntimeError("Utilities 'awg' or 'wg' are not installed or not in PATH.")
+
+    @classmethod
+    def _build_command(cls, *args: str) -> list[str]:
+        """
+        Строит команду для выполнения.
+        Если WG_CONTAINER_NAME задан — оборачивает в docker exec.
+        Иначе вызывает напрямую.
+        """
+        cmd = list(args)
+        container = settings.wg_container_name.strip()
+        if container:
+            return ["docker", "exec", container] + cmd
+        return cmd
 
     @classmethod
     async def generate_keys(cls) -> tuple[str, str]:
         binary = cls._resolve_wg_binary()
 
+        genkey_cmd = cls._build_command(binary, "genkey")
+        log_wg_command(genkey_cmd)
         process_genkey = await asyncio.create_subprocess_exec(
-            binary,
-            "genkey",
+            *genkey_cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -99,9 +116,10 @@ class VPNService:
         if not private_key:
             raise RuntimeError("Generated private key is empty.")
 
+        pubkey_cmd = cls._build_command(binary, "pubkey")
+        log_wg_command(pubkey_cmd)
         process_pubkey = await asyncio.create_subprocess_exec(
-            binary,
-            "pubkey",
+            *pubkey_cmd,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -121,9 +139,6 @@ class VPNService:
 
     @classmethod
     async def get_next_ipv4(cls, db: aiosqlite.Connection) -> str:
-        """
-        Вычисляет ПЕРВЫЙ свободный IPv4-адрес в CIDR пуле.
-        """
         network = ipaddress.IPv4Network(settings.vpn_ip_range, strict=False)
         host_count = max(network.num_addresses - 2, 0)
         if host_count < 2:
@@ -144,9 +159,8 @@ class VPNService:
                 if parsed_ip in network:
                     used_ips.add(parsed_ip)
 
-        # Первый host традиционно резервируется под сервер/шлюз.
         host_iterator = iter(network.hosts())
-        next(host_iterator, None)
+        next(host_iterator, None)  # резервируем первый адрес для шлюза
 
         for ip in host_iterator:
             if ip not in used_ips:
@@ -155,61 +169,36 @@ class VPNService:
         raise ValueError("No available IP addresses in the configured range")
 
     @classmethod
-    async def create_profile(cls, user_id: int, name: str) -> dict:
-        """
-        Атомарное создание профиля.
-        """
-        async with aiosqlite.connect(settings.db_path, timeout=30) as db:
-            await db.execute("PRAGMA foreign_keys = ON")
-            await db.execute("BEGIN IMMEDIATE")
-            try:
-                private_key, public_key = await cls.generate_keys()
-                ipv4 = await cls.get_next_ipv4(db)
-                encrypted_key = cls.encrypt_data(private_key)
+    async def create_profile(
+        cls, db: aiosqlite.Connection, user_id: int, name: str
+    ) -> dict:
+        """Атомарное создание профиля. Принимает db — не открывает своё соединение."""
+        await db.execute("BEGIN IMMEDIATE")
+        try:
+            private_key, public_key = await cls.generate_keys()
+            ipv4 = await cls.get_next_ipv4(db)
+            encrypted_key = cls.encrypt_data(private_key)
 
-                synced = await cls.sync_peer_with_server(public_key, ipv4)
+            synced = await cls.sync_peer_with_server(public_key, ipv4)
 
-                await db.execute(
-                    (
-                        "INSERT INTO vpn_profiles "
-                        "(user_id, name, private_key, public_key, ipv4_address) "
-                        "VALUES (?, ?, ?, ?, ?)"
-                    ),
-                    (user_id, name, encrypted_key, public_key, ipv4),
-                )
-                await db.commit()
+            await repository.insert_vpn_profile(db, user_id, name, encrypted_key, public_key, ipv4)
+            await db.commit()
 
-                return {
-                    "name": name,
-                    "ipv4": ipv4,
-                    "config": cls.generate_config_content(private_key, ipv4),
-                    "synced": synced,
-                }
-            except aiosqlite.IntegrityError as exc:
-                await db.rollback()
-                raise RuntimeError(
-                    "Failed to create profile due to DB integrity violation. "
-                    "Check duplicate public_key/ipv4.",
-                ) from exc
-            except Exception:
-                await db.rollback()
-                raise
-
-    @classmethod
-    async def update_profile(cls, profile_id: int, new_name: str | None = None) -> bool:
-        """
-        Обновление существующего профиля.
-        """
-        async with aiosqlite.connect(settings.db_path) as db:
-            if not new_name:
-                return False
-            try:
-                await db.execute("UPDATE vpn_profiles SET name = ? WHERE id = ?", (new_name, profile_id))
-                await db.commit()
-                return True
-            except aiosqlite.Error as exc:
-                logger.error(f"Failed to update profile: {exc}")
-                return False
+            return {
+                "name": name,
+                "ipv4": ipv4,
+                "config": cls.generate_config_content(private_key, ipv4),
+                "synced": synced,
+            }
+        except aiosqlite.IntegrityError as exc:
+            await db.rollback()
+            raise RuntimeError(
+                "Failed to create profile due to DB integrity violation. "
+                "Check duplicate public_key/ipv4.",
+            ) from exc
+        except Exception:
+            await db.rollback()
+            raise
 
     @classmethod
     async def sync_peer_with_server(cls, public_key: str, ipv4: str) -> bool:
@@ -219,7 +208,10 @@ class VPNService:
             logger.error(str(exc))
             return False
 
-        args = [binary, "set", settings.wg_interface, "peer", public_key, "allowed-ips", f"{ipv4}/32"]
+        args = cls._build_command(
+            binary, "set", settings.wg_interface, "peer", public_key,
+            "allowed-ips", f"{ipv4}/32"
+        )
         log_wg_command(args)
         try:
             process = await asyncio.create_subprocess_exec(
@@ -291,11 +283,9 @@ AllowedIPs = 0.0.0.0/0
                 "message": str(exc),
             }
 
+        args = cls._build_command(binary, "show", interface, "dump")
         process = await asyncio.create_subprocess_exec(
-            binary,
-            "show",
-            interface,
-            "dump",
+            *args,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -321,22 +311,21 @@ AllowedIPs = 0.0.0.0/0
     @classmethod
     async def get_monthly_usage(cls, db: aiosqlite.Connection, user_id: int) -> list[dict]:
         all_stats = await cls.get_all_peers_stats()
-        query = "SELECT id, name, public_key, ipv4_address, monthly_offset_bytes FROM vpn_profiles WHERE user_id = ?"
-        results: list[dict[str, int | str]] = []
-        async with db.execute(query, (user_id,)) as cursor:
-            async for row in cursor:
-                pub_key = row[2]
-                offset = row[4] or 0
-                stats = all_stats.get(pub_key, {"total": 0, "rx": 0, "tx": 0})
-                monthly_total = (
-                    stats["total"] - offset if stats["total"] >= offset else stats["total"]
-                )
-                results.append({
-                    "id": row[0],
-                    "name": row[1],
-                    "ip": row[3],
-                    "monthly_total": monthly_total,
-                })
+        rows = await repository.get_monthly_usage_rows(db, user_id)
+        results: list[dict] = []
+        for row in rows:
+            pub_key = row["public_key"]
+            offset = row["monthly_offset_bytes"] or 0
+            stats = all_stats.get(pub_key, {"total": 0, "rx": 0, "tx": 0})
+            monthly_total = (
+                stats["total"] - offset if stats["total"] >= offset else stats["total"]
+            )
+            results.append({
+                "id": row["id"],
+                "name": row["name"],
+                "ip": row["ipv4_address"],
+                "monthly_total": monthly_total,
+            })
         return results
 
     @classmethod
@@ -347,7 +336,7 @@ AllowedIPs = 0.0.0.0/0
             logger.error(str(exc))
             return False
 
-        args = [binary, "set", settings.wg_interface, "peer", public_key, "remove"]
+        args = cls._build_command(binary, "set", settings.wg_interface, "peer", public_key, "remove")
         log_wg_command(args)
         try:
             process = await asyncio.create_subprocess_exec(
@@ -366,40 +355,27 @@ AllowedIPs = 0.0.0.0/0
             return False
 
     @classmethod
-    async def delete_profile(cls, profile_id: int) -> bool:
-        """Удаляет профиль из WireGuard и базы данных."""
-        async with aiosqlite.connect(settings.db_path) as db:
-            cursor = await db.execute(
-                "SELECT public_key FROM vpn_profiles WHERE id = ?",
-                (profile_id,),
-            )
-            row = await cursor.fetchone()
-            if not row:
-                return False
+    async def delete_profile(cls, db: aiosqlite.Connection, profile_id: int) -> bool:
+        """Удаляет профиль из WireGuard и базы данных. Принимает db — не открывает своё соединение."""
+        public_key = await repository.get_profile_public_key(db, profile_id)
+        if not public_key:
+            return False
 
-            public_key = row[0]
-            await cls.remove_peer_from_server(public_key)
-
-            await db.execute("DELETE FROM vpn_profiles WHERE id = ?", (profile_id,))
-            await db.commit()
-            return True
+        await cls.remove_peer_from_server(public_key)
+        await repository.delete_vpn_profile(db, profile_id)
+        return True
 
     @classmethod
-    async def get_profile_config(cls, profile_id: int) -> dict | None:
-        """Восстанавливает конфиг профиля из базы данных."""
-        async with aiosqlite.connect(settings.db_path) as db:
-            cursor = await db.execute(
-                "SELECT name, private_key, ipv4_address FROM vpn_profiles WHERE id = ?",
-                (profile_id,),
-            )
-            row = await cursor.fetchone()
-            if not row:
-                return None
+    async def get_profile_config(cls, db: aiosqlite.Connection, profile_id: int) -> dict | None:
+        """Восстанавливает конфиг профиля. Принимает db — не открывает своё соединение."""
+        row = await repository.get_profile_for_config(db, profile_id)
+        if not row:
+            return None
 
-            name, encrypted_key, ipv4 = row
-            private_key = cls.decrypt_data(encrypted_key)
-            config = cls.generate_config_content(private_key, ipv4)
-            return {"name": name, "config": config, "ipv4": ipv4}
+        name, encrypted_key, ipv4 = row["name"], row["private_key"], row["ipv4_address"]
+        private_key = cls.decrypt_data(encrypted_key)
+        config = cls.generate_config_content(private_key, ipv4)
+        return {"name": name, "config": config, "ipv4": ipv4}
 
     @classmethod
     async def get_all_peers_stats(cls) -> dict[str, dict[str, int]]:
@@ -408,12 +384,10 @@ AllowedIPs = 0.0.0.0/0
         except RuntimeError:
             return {}
 
+        args = cls._build_command(binary, "show", settings.wg_interface, "dump")
         try:
             process = await asyncio.create_subprocess_exec(
-                binary,
-                "show",
-                settings.wg_interface,
-                "dump",
+                *args,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )

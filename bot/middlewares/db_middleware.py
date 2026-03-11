@@ -2,13 +2,18 @@ import aiosqlite
 from typing import Any, Awaitable, Callable, Dict
 from aiogram import BaseMiddleware
 from aiogram.types import TelegramObject
-from bot.core.config import settings
 
 
 class DbMiddleware(BaseMiddleware):
     """
     Middleware для внедрения соединения с базой данных SQLite в каждый апдейт.
+    Соединение создаётся один раз при старте бота через lifecycle hook (on_startup)
+    и передаётся в handlers через data["db"].
     """
+
+    def __init__(self, db: aiosqlite.Connection) -> None:
+        self._db = db
+        super().__init__()
 
     async def __call__(
         self,
@@ -16,10 +21,5 @@ class DbMiddleware(BaseMiddleware):
         event: TelegramObject,
         data: Dict[str, Any],
     ) -> Any:
-        # Открываем асинхронное соединение с базой данных
-        async with aiosqlite.connect(settings.db_path) as db:
-            db.row_factory = aiosqlite.Row
-            # Включаем foreign keys для каждого соединения (SQLite PRAGMA действует per-connection)
-            await db.execute("PRAGMA foreign_keys = ON")
-            data["db"] = db
-            return await handler(event, data)
+        data["db"] = self._db
+        return await handler(event, data)

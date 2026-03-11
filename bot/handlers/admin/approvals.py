@@ -5,8 +5,10 @@ from loguru import logger
 import aiosqlite
 
 from bot.filters.admin import AdminFilter
-from bot.handlers.admin.menu import BTN_APPROVALS
+from bot.keyboards.admin import BTN_APPROVALS
+from bot.keyboards.user import get_user_keyboard
 from bot.core.logging import audit
+from bot.db import repository
 
 router = Router()
 
@@ -71,26 +73,9 @@ def pending_list_keyboard(users: list, page: int, total: int) -> InlineKeyboardM
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
-async def _get_pending(db: aiosqlite.Connection, page: int) -> tuple[list, int]:
-    cursor = await db.execute("SELECT COUNT(*) as cnt FROM approvals WHERE status = 'pending'")
-    total = (await cursor.fetchone())["cnt"]
-
-    cursor = await db.execute(
-        """SELECT a.user_id, u.full_name, u.username
-           FROM approvals a
-           JOIN users u ON a.user_id = u.telegram_id
-           WHERE a.status = 'pending'
-           ORDER BY a.id
-           LIMIT ? OFFSET ?""",
-        (PAGE_SIZE, page * PAGE_SIZE),
-    )
-    rows = [dict(r) for r in await cursor.fetchall()]
-    return rows, total
-
-
 @router.message(F.text == BTN_APPROVALS, AdminFilter())
 async def handle_approvals(message: Message, db: aiosqlite.Connection):
-    rows, total = await _get_pending(db, 0)
+    rows, total = await repository.get_pending_approvals(db, 0, PAGE_SIZE)
     logger.debug("[ACCESS] Админ открыл список заявок | admin_id={} pending={}", message.from_user.id, total)
     if not rows:
         await message.answer("✅ Нет ожидающих заявок.")
@@ -103,7 +88,7 @@ async def handle_approvals(message: Message, db: aiosqlite.Connection):
 
 @router.callback_query(ApprovalAction.filter(F.action == "page"), AdminFilter())
 async def handle_approvals_page(callback: CallbackQuery, callback_data: ApprovalAction, db: aiosqlite.Connection):
-    rows, total = await _get_pending(db, callback_data.page)
+    rows, total = await repository.get_pending_approvals(db, callback_data.page, PAGE_SIZE)
     await callback.message.edit_text(
         f"⏳ <b>Заявки на доступ</b> ({total} ожидает):",
         reply_markup=pending_list_keyboard(rows, callback_data.page, total),
@@ -116,20 +101,18 @@ async def handle_approve(callback: CallbackQuery, callback_data: ApprovalAction,
     user_id = callback_data.user_id
     admin_id = callback.from_user.id
 
-    await db.execute("UPDATE users SET is_approved = 1 WHERE telegram_id = ?", (user_id,))
-    await db.execute(
-        "UPDATE approvals SET status = 'approved', admin_id = ? WHERE user_id = ? AND status = 'pending'",
-        (admin_id, user_id),
-    )
-    await db.commit()
+    await repository.set_user_approved(db, user_id, True)
+    await repository.set_approval_status(db, user_id, "approved", admin_id)
 
     logger.info("[ACCESS] Пользователь одобрен | user_id={} by_admin={}", user_id, admin_id)
     audit("APPROVED", user_id=user_id, by_admin=admin_id)
 
+    # Очищаем pending VPN requests для этого пользователя
+    from bot.handlers.user.profiles import _pending_vpn_requests
+    _pending_vpn_requests.discard(user_id)
+
     await callback.answer("✅ Пользователь одобрен!")
     await callback.message.edit_text(callback.message.text + "\n\n✅ <b>Одобрено.</b>")
-
-    from bot.handlers.user.menu import get_user_keyboard
 
     try:
         await bot.send_message(
@@ -147,14 +130,14 @@ async def handle_reject(callback: CallbackQuery, callback_data: ApprovalAction, 
     user_id = callback_data.user_id
     admin_id = callback.from_user.id
 
-    await db.execute(
-        "UPDATE approvals SET status = 'rejected', admin_id = ? WHERE user_id = ? AND status = 'pending'",
-        (admin_id, user_id),
-    )
-    await db.commit()
+    await repository.set_approval_status(db, user_id, "rejected", admin_id)
 
     logger.info("[ACCESS] Заявка пользователя отклонена | user_id={} by_admin={}", user_id, admin_id)
     audit("REJECTED", user_id=user_id, by_admin=admin_id)
+
+    # Очищаем pending VPN requests для этого пользователя
+    from bot.handlers.user.profiles import _pending_vpn_requests
+    _pending_vpn_requests.discard(user_id)
 
     await callback.answer("❌ Заявка отклонена.")
     await callback.message.edit_text(callback.message.text + "\n\n❌ <b>Отклонено.</b>")

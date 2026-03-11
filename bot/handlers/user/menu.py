@@ -1,23 +1,10 @@
 from aiogram import Router, F
 from aiogram.filters import Command
-from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton
+from aiogram.types import Message
+
+from bot.keyboards.user import BTN_PROFILES, BTN_TRAFFIC, BTN_STATUS, BTN_HELP, get_user_keyboard
 
 router = Router()
-
-BTN_PROFILES = "🔑 Мои профили"
-BTN_TRAFFIC = "📈 Трафик"
-BTN_STATUS = "ℹ️ Статус"
-BTN_HELP = "❓ Помощь"
-
-
-def get_user_keyboard() -> ReplyKeyboardMarkup:
-    return ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text=BTN_PROFILES), KeyboardButton(text=BTN_TRAFFIC)],
-            [KeyboardButton(text=BTN_STATUS), KeyboardButton(text=BTN_HELP)],
-        ],
-        resize_keyboard=True,
-    )
 
 
 @router.message(Command("menu"))

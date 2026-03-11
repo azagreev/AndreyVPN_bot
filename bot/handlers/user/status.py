@@ -4,7 +4,7 @@ from aiogram import Router, F
 from aiogram.types import Message
 import aiosqlite
 
-from bot.handlers.user.menu import BTN_STATUS, BTN_TRAFFIC
+from bot.keyboards.user import BTN_STATUS, BTN_TRAFFIC
 from bot.services.vpn_service import VPNService
 
 router = Router()

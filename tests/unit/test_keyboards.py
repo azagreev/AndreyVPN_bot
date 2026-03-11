@@ -7,6 +7,37 @@
 import pytest
 from aiogram.types import ReplyKeyboardMarkup, InlineKeyboardMarkup
 
+from bot.keyboards.user import get_user_keyboard, BTN_PROFILES, BTN_TRAFFIC, BTN_STATUS, BTN_HELP
+from bot.keyboards.admin import get_admin_keyboard, BTN_USERS, BTN_APPROVALS, BTN_STATS, BTN_SERVER
+
+
+def test_user_keyboard_structure():
+    kb = get_user_keyboard()
+    flat = [btn.text for row in kb.keyboard for btn in row]
+    assert BTN_PROFILES in flat
+    assert BTN_TRAFFIC in flat
+    assert BTN_STATUS in flat
+    assert BTN_HELP in flat
+
+
+def test_admin_keyboard_structure():
+    kb = get_admin_keyboard()
+    flat = [btn.text for row in kb.keyboard for btn in row]
+    assert BTN_USERS in flat
+    assert BTN_APPROVALS in flat
+    assert BTN_STATS in flat
+    assert BTN_SERVER in flat
+
+
+def test_user_keyboard_resize():
+    kb = get_user_keyboard()
+    assert kb.resize_keyboard is True
+
+
+def test_admin_keyboard_resize():
+    kb = get_admin_keyboard()
+    assert kb.resize_keyboard is True
+
 
 # ---------------------------------------------------------------------------
 # User keyboard
