@@ -65,20 +65,23 @@ def test_get_user_keyboard_structure():
 # ---------------------------------------------------------------------------
 
 def test_get_admin_keyboard_structure():
-    """Административная клавиатура содержит 2 ряда по 2 кнопки в каждом."""
+    """Административная клавиатура содержит 3 ряда: 2+2+1 кнопки."""
     from bot.handlers.admin.menu import get_admin_keyboard, BTN_USERS, BTN_APPROVALS, BTN_STATS, BTN_SERVER
+    from bot.keyboards.admin import BTN_VERSION
 
     kb = get_admin_keyboard()
     assert isinstance(kb, ReplyKeyboardMarkup), "Должна возвращаться ReplyKeyboardMarkup"
-    assert len(kb.keyboard) == 2, "Должно быть 2 ряда кнопок"
+    assert len(kb.keyboard) == 3, "Должно быть 3 ряда кнопок"
     assert len(kb.keyboard[0]) == 2, "Первый ряд должен содержать 2 кнопки"
     assert len(kb.keyboard[1]) == 2, "Второй ряд должен содержать 2 кнопки"
+    assert len(kb.keyboard[2]) == 1, "Третий ряд должен содержать 1 кнопку (Версия)"
 
     all_texts = [btn.text for row in kb.keyboard for btn in row]
     assert BTN_USERS in all_texts, "Должна быть кнопка пользователей"
     assert BTN_APPROVALS in all_texts, "Должна быть кнопка заявок"
     assert BTN_STATS in all_texts, "Должна быть кнопка статистики"
     assert BTN_SERVER in all_texts, "Должна быть кнопка сервера"
+    assert BTN_VERSION in all_texts, "Должна быть кнопка версии"
 
 
 # ---------------------------------------------------------------------------

@@ -79,7 +79,7 @@ async def test_delete_confirm_removes_profile(prepared_db, db_connection, admin_
     callback = make_callback(user_id=user_id)
     callback_data = ProfileAction(action="confirm_delete", profile_id=profile_id)
 
-    async def fake_delete(pid):
+    async def fake_delete(db, pid):
         await db_connection.execute("DELETE FROM vpn_profiles WHERE id = ?", (pid,))
         await db_connection.commit()
         return True

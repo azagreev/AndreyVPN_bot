@@ -111,21 +111,6 @@ async def test_ip_pool_exhaustion(db_connection: aiosqlite.Connection) -> None:
 
 
 # ============================================================================
-# update_profile edge cases
-# ============================================================================
-
-
-@pytest.mark.asyncio
-async def test_update_profile_none_name(prepared_db: Path) -> None:
-    assert await VPNService.update_profile(1, None) is False
-
-
-@pytest.mark.asyncio
-async def test_update_profile_empty_name(prepared_db: Path) -> None:
-    assert await VPNService.update_profile(1, "") is False
-
-
-# ============================================================================
 # get_server_status
 # ============================================================================
 

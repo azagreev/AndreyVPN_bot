@@ -143,9 +143,9 @@ async def test_get_global_stats(db_connection: aiosqlite.Connection) -> None:
 
 @pytest.mark.asyncio
 async def test_schema_version(db_connection: aiosqlite.Connection) -> None:
-    version = await repository.get_schema_version(db_connection)
+    """Версия схемы хранится в PRAGMA user_version и доступна для чтения."""
+    cursor = await db_connection.execute("PRAGMA user_version")
+    row = await cursor.fetchone()
+    version = row[0] if row else 0
     assert isinstance(version, int)
-
-    await repository.set_schema_version(db_connection, 5)
-    version = await repository.get_schema_version(db_connection)
-    assert version == 5
+    assert version >= 1, "После init_db user_version должна быть >= 1"

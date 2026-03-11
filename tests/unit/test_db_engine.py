@@ -46,11 +46,11 @@ async def test_init_db_idempotent(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_init_db_sets_schema_version(tmp_path: Path) -> None:
-    from bot.db.repository import get_schema_version
     db_path = str(tmp_path / "test_version.db")
     await init_db(db_path)
 
     async with aiosqlite.connect(db_path) as db:
-        db.row_factory = aiosqlite.Row
-        version = await get_schema_version(db)
+        cursor = await db.execute("PRAGMA user_version")
+        row = await cursor.fetchone()
+        version = row[0] if row else 0
     assert version >= 1

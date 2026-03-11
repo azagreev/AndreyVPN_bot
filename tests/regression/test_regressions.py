@@ -367,21 +367,8 @@ async def test_config_reconstruction_matches_original(prepared_db, db_connection
     cursor = await db_connection.execute("SELECT last_insert_rowid()")
     profile_id = (await cursor.fetchone())[0]
 
-    # Восстанавливаем конфиг через get_profile_config
-    # Используем паттерн context manager для aiosqlite.connect
-    cur = AsyncMock()
-    cur.fetchone = AsyncMock(return_value=("RoundtripTest", encrypted, ip))
-    db_inner = AsyncMock()
-    db_inner.execute = AsyncMock(return_value=cur)
-
-    class FakeConnect:
-        async def __aenter__(self):
-            return db_inner
-        async def __aexit__(self, *args):
-            return False
-
-    with patch("bot.services.vpn_service.aiosqlite.connect", return_value=FakeConnect()):
-        result = await VPNService.get_profile_config(profile_id)
+    # Восстанавливаем конфиг через get_profile_config, передавая db-соединение напрямую
+    result = await VPNService.get_profile_config(db_connection, profile_id)
 
     assert result is not None, "get_profile_config не должен возвращать None"
     assert original_private in result["config"], \

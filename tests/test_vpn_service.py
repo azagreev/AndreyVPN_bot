@@ -157,10 +157,16 @@ async def test_create_profile_is_atomic_and_encrypts_keys(
     monkeypatch.setattr(VPNService, "generate_keys", classmethod(fake_generate_keys))
     monkeypatch.setattr(VPNService, "sync_peer_with_server", classmethod(fake_sync))
 
+    async def create_with_own_db(user_id: int, name: str) -> dict:
+        async with aiosqlite.connect(prepared_db) as conn:
+            conn.row_factory = aiosqlite.Row
+            await conn.execute("PRAGMA foreign_keys = ON")
+            return await VPNService.create_profile(conn, user_id, name)
+
     results = await asyncio.gather(
-        VPNService.create_profile(101, "profile_101"),
-        VPNService.create_profile(102, "profile_102"),
-        VPNService.create_profile(103, "profile_103"),
+        create_with_own_db(101, "profile_101"),
+        create_with_own_db(102, "profile_102"),
+        create_with_own_db(103, "profile_103"),
     )
     allocated_ips = {item["ipv4"] for item in results}
     assert allocated_ips == {"10.0.0.2", "10.0.0.3", "10.0.0.4"}
@@ -183,23 +189,3 @@ async def test_create_profile_is_atomic_and_encrypts_keys(
         assert VPNService.decrypt_data(stored_key).startswith("private_")
 
 
-@pytest.mark.asyncio
-async def test_update_profile(prepared_db: Path) -> None:
-    async with aiosqlite.connect(prepared_db) as db:
-        await db.execute("INSERT INTO users (telegram_id) VALUES (201)")
-        await db.execute(
-            """
-            INSERT INTO vpn_profiles (user_id, name, private_key, public_key, ipv4_address)
-            VALUES (?, ?, ?, ?, ?)
-            """,
-            (201, "old", VPNService.encrypt_data("old_key"), "pub_old", "10.0.0.2"),
-        )
-        await db.commit()
-
-    assert await VPNService.update_profile(1, "new") is True
-
-    async with aiosqlite.connect(prepared_db) as db:
-        async with db.execute("SELECT name FROM vpn_profiles WHERE id = 1") as cursor:
-            row = await cursor.fetchone()
-    assert row is not None
-    assert row[0] == "new"

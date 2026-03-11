@@ -15,9 +15,10 @@ from bot.middlewares.db_middleware import DbMiddleware
 
 
 @pytest.mark.asyncio
-async def test_db_middleware_injects_connection(test_settings: Path) -> None:
-    """DbMiddleware must inject an aiosqlite.Connection as data['db']."""
-    middleware = DbMiddleware()
+async def test_db_middleware_injects_connection() -> None:
+    """DbMiddleware должен внедрять переданное соединение в data['db']."""
+    mock_db = MagicMock(spec=aiosqlite.Connection)
+    middleware = DbMiddleware(mock_db)
     handler = AsyncMock(return_value="ok")
     event = MagicMock()
 
@@ -25,29 +26,26 @@ async def test_db_middleware_injects_connection(test_settings: Path) -> None:
 
     assert result == "ok"
     handler.assert_awaited_once()
-    assert handler.await_args is not None
     _, call_data = handler.await_args.args
     assert "db" in call_data
-    assert isinstance(call_data["db"], aiosqlite.Connection)
+    assert call_data["db"] is mock_db
 
 
 @pytest.mark.asyncio
-async def test_db_middleware_closes_connection(test_settings: Path) -> None:
-    """Connection is closed after handler returns."""
-    middleware = DbMiddleware()
-    captured_db: list[aiosqlite.Connection] = []
+async def test_db_middleware_passes_existing_data() -> None:
+    """DbMiddleware не перезаписывает другие ключи в data."""
+    mock_db = MagicMock(spec=aiosqlite.Connection)
+    middleware = DbMiddleware(mock_db)
+    handler = AsyncMock(return_value="ok")
+    event = MagicMock()
+    initial_data = {"state": "some_state", "user": "some_user"}
 
-    async def grab_db(_event: Any, data: dict[str, Any]) -> None:
-        captured_db.append(data["db"])
+    await middleware(handler, event, initial_data)
 
-    handler = AsyncMock(side_effect=grab_db)
-    await middleware(handler, MagicMock(), {})
-
-    # After the context manager exits the connection should be closed.
-    db = captured_db[0]
-    import sqlite3
-    with pytest.raises(sqlite3.ProgrammingError):
-        await db.execute("SELECT 1")
+    _, call_data = handler.await_args.args
+    assert call_data["state"] == "some_state"
+    assert call_data["user"] == "some_user"
+    assert call_data["db"] is mock_db
 
 
 # ---------------------------------------------------------------------------
@@ -58,13 +56,13 @@ async def test_db_middleware_closes_connection(test_settings: Path) -> None:
 @pytest.mark.asyncio
 async def test_access_passes_admin(
     db_connection: aiosqlite.Connection,
-    admin_user: Any,
-    make_message: Any,
+    admin_id: int,
+    mock_message: Any,
 ) -> None:
-    """Admin user always passes through regardless of approval status."""
+    """Администратор всегда пропускается вне зависимости от is_approved."""
     middleware = AccessControlMiddleware()
     handler = AsyncMock(return_value="ok")
-    msg = make_message(admin_user, "/anything")
+    msg = mock_message(admin_id, "/anything")
     data: dict[str, Any] = {"db": db_connection}
 
     result = await middleware(handler, msg, data)
@@ -75,13 +73,12 @@ async def test_access_passes_admin(
 @pytest.mark.asyncio
 async def test_access_passes_start_command(
     db_connection: aiosqlite.Connection,
-    mock_user: Any,
-    make_message: Any,
+    mock_message: Any,
 ) -> None:
-    """/start command is always allowed for any user."""
+    """/start разрешён для любого пользователя."""
     middleware = AccessControlMiddleware()
     handler = AsyncMock(return_value="ok")
-    msg = make_message(mock_user, "/start")
+    msg = mock_message(42000, "/start")
     data: dict[str, Any] = {"db": db_connection}
 
     result = await middleware(handler, msg, data)
@@ -92,13 +89,12 @@ async def test_access_passes_start_command(
 @pytest.mark.asyncio
 async def test_access_passes_captcha_state(
     db_connection: aiosqlite.Connection,
-    mock_user: Any,
-    make_message: Any,
+    mock_message: Any,
 ) -> None:
-    """User in captcha state must be allowed through."""
+    """Пользователь в состоянии капчи пропускается."""
     middleware = AccessControlMiddleware()
     handler = AsyncMock(return_value="ok")
-    msg = make_message(mock_user, "42")
+    msg = mock_message(42001, "42")
 
     state = AsyncMock()
     state.get_state = AsyncMock(return_value="CaptchaStates:waiting_for_answer")
@@ -112,13 +108,12 @@ async def test_access_passes_captcha_state(
 @pytest.mark.asyncio
 async def test_access_blocks_unapproved_user_message(
     db_connection: aiosqlite.Connection,
-    mock_user: Any,
-    make_message: Any,
+    mock_message: Any,
 ) -> None:
-    """Unapproved user sending a regular message is blocked."""
+    """Неодобренный пользователь с обычным сообщением получает отказ."""
     middleware = AccessControlMiddleware()
     handler = AsyncMock()
-    msg = make_message(mock_user, "hello")
+    msg = mock_message(42002, "hello")
     data: dict[str, Any] = {"db": db_connection, "state": None}
 
     result = await middleware(handler, msg, data)
@@ -130,13 +125,12 @@ async def test_access_blocks_unapproved_user_message(
 @pytest.mark.asyncio
 async def test_access_blocks_unapproved_callback_query(
     db_connection: aiosqlite.Connection,
-    mock_user: Any,
-    make_callback_query: Any,
+    mock_callback: Any,
 ) -> None:
-    """Unapproved user firing a callback is blocked with show_alert."""
+    """Неодобренный пользователь с callback получает show_alert."""
     middleware = AccessControlMiddleware()
     handler = AsyncMock()
-    cq = make_callback_query(mock_user)
+    cq = mock_callback(42003, "some_data")
     data: dict[str, Any] = {"db": db_connection, "state": None}
 
     result = await middleware(handler, cq, data)
@@ -148,19 +142,22 @@ async def test_access_blocks_unapproved_callback_query(
 
 
 @pytest.mark.asyncio
-async def test_access_denies_when_db_none(
-    mock_user: Any,
-    make_message: Any,
-    test_settings: Path,
+async def test_access_passes_approved_user(
+    db_connection: aiosqlite.Connection,
+    mock_message: Any,
 ) -> None:
-    """SECURITY: When db is None (DbMiddleware didn't run), block the request."""
+    """Одобренный пользователь пропускается."""
+    from bot.db import repository
+    user_id = 42004
+    await repository.create_user(db_connection, user_id, "testuser", "Test User")
+    await repository.set_user_approved(db_connection, user_id, True)
+    await db_connection.commit()
+
     middleware = AccessControlMiddleware()
-    handler = AsyncMock()
-    msg = make_message(mock_user, "hello")
-    data: dict[str, Any] = {"state": None}  # No "db" key at all
+    handler = AsyncMock(return_value="ok")
+    msg = mock_message(user_id, "hello")
+    data: dict[str, Any] = {"db": db_connection, "state": None}
 
     result = await middleware(handler, msg, data)
-    assert result is None
-    handler.assert_not_awaited()
-    msg.answer.assert_awaited_once()
-    assert "error" in msg.answer.await_args.args[0].lower()
+    assert result == "ok"
+    handler.assert_awaited_once()

@@ -172,8 +172,8 @@ async def test_full_profile_lifecycle(prepared_db, db_connection, admin_id):
     callback_confirm = make_callback(user_id=user_id)
     callback_data_confirm = ProfileAction(action="confirm_delete", profile_id=profile_id)
 
-    # delete_profile открывает своё соединение — имитируем удаление через db_connection
-    async def fake_delete(pid):
+    # delete_profile принимает (db, pid) после рефакторинга — имитируем удаление
+    async def fake_delete(db, pid):
         await db_connection.execute("DELETE FROM vpn_profiles WHERE id = ?", (pid,))
         await db_connection.commit()
         return True

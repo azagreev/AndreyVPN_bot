@@ -65,6 +65,7 @@ async def db_connection(prepared_db: Path) -> AsyncIterator[aiosqlite.Connection
 
 import pytest
 from unittest.mock import AsyncMock, MagicMock
+from aiogram.types import Message, CallbackQuery
 
 
 @pytest.fixture
@@ -84,7 +85,8 @@ def make_user(user_id: int, username: str = None, full_name: str = "Test User"):
 
 
 def make_message(user_id: int, text: str = "", username: str = None, full_name: str = "Test User"):
-    message = MagicMock()
+    # spec=Message позволяет isinstance(mock, Message) вернуть True
+    message = MagicMock(spec=Message)
     message.from_user = make_user(user_id, username, full_name)
     message.text = text
     message.answer = AsyncMock()
@@ -92,7 +94,8 @@ def make_message(user_id: int, text: str = "", username: str = None, full_name: 
 
 
 def make_callback(user_id: int, data: str = "", message_text: str = "Test"):
-    callback = MagicMock()
+    # spec=CallbackQuery позволяет isinstance(mock, CallbackQuery) вернуть True
+    callback = MagicMock(spec=CallbackQuery)
     callback.from_user = make_user(user_id)
     callback.data = data
     callback.message = MagicMock()
