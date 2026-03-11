@@ -111,7 +111,25 @@ docker cp andreyvpn_bot:/app/data/bot_data.db ./backup_$(date +%Y%m%d).db
 | `LOG_LEVEL` | нет | `DEBUG`/`INFO`/`WARNING`/`ERROR` |
 | `VPN_IP_RANGE` | нет | CIDR пул адресов |
 
-### 7. Обновление бота
+### 7. DNS-proxy (AdGuard DNS фильтрация)
+
+Если рядом с AWG запущен `adguard-dnsproxy` в `container:` network mode
+(разделяет сеть с AWG-контейнером), клиенты могут получить фильтрацию через AdGuard DNS.
+
+Укажите IP WG-интерфейса сервера как DNS:
+```bash
+# Узнать IP WG-интерфейса (поле Address в wg0.conf)
+docker exec <awg_container> cat /opt/amnezia/awg/awg0.conf | grep "^Address"
+```
+
+```env
+# .env
+DNS_SERVERS=10.8.1.254   # замените на ваш Address без /24
+```
+
+Подробнее: [docs/DNS_PROXY.md](DNS_PROXY.md)
+
+### 8. Обновление бота
 
 ```bash
 git pull
