@@ -234,15 +234,12 @@ async def _issue_vpn_to_user(callback: CallbackQuery, user_id: int, db: aiosqlit
 
         logger.info("[VPN] Создание профиля | user_id={} profile={} by_admin={}", user_id, profile_name, admin_id)
         result = await VPNService.create_profile(db, user_id, profile_name)
-        logger.info("[VPN] Профиль создан | user_id={} profile={} ip={} synced={}", user_id, profile_name, result["ipv4"], result["synced"])
+        logger.info("[VPN] Профиль создан | user_id={} profile={} ip={}", user_id, profile_name, result["ipv4"])
         audit("VPN_ISSUED", user_id=user_id, profile=profile_name, ip=result["ipv4"], by_admin=admin_id)
 
         # Очищаем pending VPN requests для этого пользователя
         from bot.handlers.user.profiles import _pending_vpn_requests
         _pending_vpn_requests.discard(user_id)
-
-        if not result["synced"]:
-            logger.warning("[VPN] Peer не синхронизирован с WireGuard | user_id={} profile={} ip={}", user_id, profile_name, result["ipv4"])
 
         qr_bytes = VPNService.generate_qr_code(result["config"])
         qr_file = BufferedInputFile(qr_bytes, filename=f"{profile_name}.png")

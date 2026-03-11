@@ -180,6 +180,11 @@ class VPNService:
             encrypted_key = cls.encrypt_data(private_key)
 
             synced = await cls.sync_peer_with_server(public_key, ipv4)
+            if not synced:
+                raise RuntimeError(
+                    "Не удалось синхронизировать peer с WireGuard. "
+                    "Профиль не создан — проверьте доступность WireGuard сервера."
+                )
 
             await repository.insert_vpn_profile(db, user_id, name, encrypted_key, public_key, ipv4)
             await db.commit()
@@ -188,7 +193,6 @@ class VPNService:
                 "name": name,
                 "ipv4": ipv4,
                 "config": cls.generate_config_content(private_key, ipv4),
-                "synced": synced,
             }
         except aiosqlite.IntegrityError as exc:
             await db.rollback()
@@ -361,7 +365,13 @@ AllowedIPs = 0.0.0.0/0
         if not public_key:
             return False
 
-        await cls.remove_peer_from_server(public_key)
+        removed = await cls.remove_peer_from_server(public_key)
+        if not removed:
+            logger.error(
+                "[VPN] Не удалось удалить peer с WireGuard сервера | public_key={}...",
+                public_key[:8],
+            )
+            return False
         await repository.delete_vpn_profile(db, profile_id)
         return True
 
@@ -373,7 +383,11 @@ AllowedIPs = 0.0.0.0/0
             return None
 
         name, encrypted_key, ipv4 = row["name"], row["private_key"], row["ipv4_address"]
-        private_key = cls.decrypt_data(encrypted_key)
+        try:
+            private_key = cls.decrypt_data(encrypted_key)
+        except (ValueError, RuntimeError) as exc:
+            logger.error("[VPN] Не удалось расшифровать приватный ключ профиля | profile_id={} error={}", profile_id, exc)
+            return None
         config = cls.generate_config_content(private_key, ipv4)
         return {"name": name, "config": config, "ipv4": ipv4}
 

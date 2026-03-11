@@ -75,6 +75,26 @@ async def test_delete_profile_not_found(test_settings):
     assert result is False, "delete_profile должен возвращать False если профиль не найден"
 
 
+async def test_delete_profile_server_removal_fails(test_settings):
+    """delete_profile возвращает False если удаление peer с WG-сервера провалилось.
+
+    Профиль должен остаться в БД — repository.delete_vpn_profile не должен вызываться.
+    """
+    from bot.services.vpn_service import VPNService
+
+    db, cursor = make_mock_db()
+    proc = make_process(returncode=1, stderr=b"error: peer not found")
+
+    with patch("bot.db.repository.get_profile_public_key", return_value="fake_public_key"), \
+         patch("bot.db.repository.delete_vpn_profile") as mock_delete, \
+         patch("bot.services.vpn_service.shutil.which", return_value="/usr/bin/awg"), \
+         patch("bot.services.vpn_service.asyncio.create_subprocess_exec", return_value=proc):
+        result = await VPNService.delete_profile(db=db, profile_id=1)
+
+    assert result is False, "delete_profile должен возвращать False при ошибке удаления с сервера"
+    mock_delete.assert_not_called()
+
+
 # ---------------------------------------------------------------------------
 # get_profile_config
 # ---------------------------------------------------------------------------
@@ -117,6 +137,29 @@ async def test_get_profile_config_not_found(test_settings):
         result = await VPNService.get_profile_config(db=db, profile_id=404)
 
     assert result is None, "get_profile_config должен возвращать None если профиль не найден"
+
+
+async def test_get_profile_config_decrypt_failure_returns_none(test_settings):
+    """get_profile_config возвращает None если расшифровка приватного ключа провалилась.
+
+    Это защищает от необработанного исключения если ключ шифрования сменился
+    или запись в БД повреждена.
+    """
+    from bot.services.vpn_service import VPNService
+
+    mock_row = MagicMock()
+    mock_row.__getitem__ = MagicMock(side_effect=lambda k: {
+        "name": "BrokenProfile",
+        "private_key": "not_a_valid_fernet_token",
+        "ipv4_address": "10.0.0.5",
+    }[k])
+
+    db, _ = make_mock_db()
+
+    with patch("bot.db.repository.get_profile_for_config", return_value=mock_row):
+        result = await VPNService.get_profile_config(db=db, profile_id=1)
+
+    assert result is None, "get_profile_config должен возвращать None при ошибке расшифровки"
 
 
 # ---------------------------------------------------------------------------

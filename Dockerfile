@@ -34,7 +34,6 @@ COPY --from=builder /install /usr/local
 # Копируем исходный код
 COPY bot/ bot/
 COPY main.py .
-COPY .env .
 
 # Данные и логи — volume
 VOLUME ["/app/data", "/app/logs"]

@@ -189,3 +189,41 @@ async def test_create_profile_is_atomic_and_encrypts_keys(
         assert VPNService.decrypt_data(stored_key).startswith("private_")
 
 
+@pytest.mark.asyncio
+async def test_create_profile_raises_when_sync_fails(
+    prepared_db: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    fernet_key: str,
+) -> None:
+    """create_profile поднимает RuntimeError и откатывает транзакцию если WG-сервер недоступен.
+
+    Профиль не должен попасть в БД — нет смысла хранить конфиг, который не работает.
+    """
+    monkeypatch.setattr(settings, "encryption_key", SecretStr(fernet_key), raising=False)
+    VPNService.reset_cache()
+
+    async with aiosqlite.connect(prepared_db) as db:
+        await db.execute("INSERT INTO users (telegram_id) VALUES (201)")
+        await db.commit()
+
+    async def fake_generate_keys(_cls):
+        return ("private_key_test", "public_key_test")
+
+    async def fake_sync_fail(_cls, _pk, _ip):
+        return False
+
+    monkeypatch.setattr(VPNService, "generate_keys", classmethod(fake_generate_keys))
+    monkeypatch.setattr(VPNService, "sync_peer_with_server", classmethod(fake_sync_fail))
+
+    async with aiosqlite.connect(prepared_db) as conn:
+        conn.row_factory = aiosqlite.Row
+        await conn.execute("PRAGMA foreign_keys = ON")
+        with pytest.raises(RuntimeError, match="WireGuard"):
+            await VPNService.create_profile(conn, 201, "ShouldNotExist")
+
+    async with aiosqlite.connect(prepared_db) as db:
+        async with db.execute("SELECT COUNT(*) FROM vpn_profiles") as cur:
+            (count,) = await cur.fetchone()
+    assert count == 0, "Профиль не должен быть создан в БД если WG-сервер недоступен"
+
+

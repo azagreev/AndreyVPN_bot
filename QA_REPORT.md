@@ -1,7 +1,7 @@
 # QA/Security Report: AndreyVPN_bot
 
-Дата: 2026-02-24  
-Ветка: `master`  
+Дата: 2026-03-12
+Ветка: `master`
 Репозиторий: `https://github.com/azagreev/AndreyVPN_bot.git`
 
 ## 1. Итог
@@ -50,6 +50,13 @@
   - при отсутствии обоих — fail-fast.
 - Обновлены проверки и обработка ошибок в `generate_keys`, `sync_peer_with_server`, `get_all_peers_stats`, `get_server_status`.
 
+### 2.5 Атомарность операций WG ↔ БД (v1.2.0)
+- `create_profile`: если `sync_peer_with_server()` возвращает `False` — транзакция откатывается, профиль не сохраняется в БД. Устраняет ситуацию «профиль есть, VPN не работает».
+- `delete_profile`: если `remove_peer_from_server()` возвращает `False` — профиль не удаляется из БД. Устраняет orphaned peer на сервере.
+- `get_profile_config`: `decrypt_data()` обёрнут в `try/except (ValueError, RuntimeError)` — при повреждённом ключе возвращает `None` и пишет `ERROR` в лог вместо unhandled exception.
+- Docker: убрана `COPY .env .` из `Dockerfile` — секреты не попадают в слои образа.
+- `main.py`: проверка наличия `.env` пропускается если переменные уже заданы через environment (совместимость с Docker).
+
 ### 2.5 Test infra
 - `tests/conftest.py`:
   - изолированный `tmp` DB;
@@ -58,14 +65,15 @@
   - общие async fixtures.
 - Добавлены/обновлены тесты:
   - `tests/test_vpn_service.py`;
-  - `tests/test_migrate_to_fernet.py`.
+  - `tests/test_migrate_to_fernet.py`;
+  - `tests/unit/test_vpn_service_methods.py`.
 
 ## 3. Результаты проверок
 
 Команды и статус:
 - `python3 -m ruff check .` -> **passed**
 - `python3 -m mypy` -> **passed**
-- `python3 -m pytest -q tests` -> **12 passed**
+- `python3 -m pytest -q tests` -> **159 passed**
 
 ## 4. Измененные файлы (ключевые)
 

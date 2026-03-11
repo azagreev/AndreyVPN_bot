@@ -101,6 +101,7 @@ async def handle_download_conf(callback: CallbackQuery, callback_data: ProfileAc
     await callback.answer("Генерирую конфиг...")
     result = await VPNService.get_profile_config(db, profile_id)
     if not result:
+        await bot.send_message(user_id, "❌ Не удалось получить конфиг профиля. Обратитесь к администратору.")
         return
 
     conf_file = BufferedInputFile(result["config"].encode(), filename=f"{result['name']}.conf")
@@ -124,6 +125,7 @@ async def handle_show_qr(callback: CallbackQuery, callback_data: ProfileAction, 
     await callback.answer("Генерирую QR-код...")
     result = await VPNService.get_profile_config(db, profile_id)
     if not result:
+        await bot.send_message(user_id, "❌ Не удалось получить конфиг профиля. Обратитесь к администратору.")
         return
 
     qr_bytes = VPNService.generate_qr_code(result["config"])

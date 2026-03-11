@@ -6,6 +6,20 @@ Versioning: [Semantic Versioning](https://semver.org/)
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-03-12
+### Fixed
+- `create_profile`: профиль больше не сохраняется в БД если синхронизация с WireGuard провалилась — поднимается `RuntimeError`, транзакция откатывается
+- `delete_profile`: профиль больше не удаляется из БД если peer не был удалён с WG-сервера (возвращает `False` вместо `True`)
+- `get_profile_config`: расшифровка приватного ключа обёрнута в `try/except` — при повреждённом ключе возвращает `None` и логирует ошибку вместо необработанного исключения
+- Хендлеры `.conf` и `QR`: при `get_profile_config == None` теперь показывают пользователю сообщение об ошибке вместо молчаливого возврата
+- `Dockerfile`: убрана строка `COPY .env .` — секреты больше не попадают в слои образа; переменные передаются через `environment` в docker-compose
+- `main.py`: проверка `.env` при старте теперь пропускается если переменные окружения уже заданы (Docker-сценарий)
+
+### Tests
+- Добавлен `test_create_profile_raises_when_sync_fails` — WG недоступен → профиль не создаётся в БД
+- Добавлен `test_delete_profile_server_removal_fails` — ошибка WG → `False`, `delete_vpn_profile` не вызывается
+- Добавлен `test_get_profile_config_decrypt_failure_returns_none` — повреждённый ключ → `None` без исключения
+
 ## [1.1.0] - 2026-03-12
 ### Added
 - Docker support with multi-stage Dockerfile and docker-compose.yml

@@ -19,10 +19,11 @@ from bot.handlers import setup_handlers
 
 
 def main() -> None:
-    # Проверка .env до инициализации логирования
-    if not os.path.exists(".env"):
+    # Проверка .env до инициализации логирования.
+    # В Docker переменные приходят из окружения — файл не нужен.
+    if not os.path.exists(".env") and not os.environ.get("BOT_TOKEN"):
         print(
-            "CRITICAL | [STARTUP] Файл .env не найден. "
+            "CRITICAL | [STARTUP] Файл .env не найден и переменные окружения не заданы. "
             "Скопируйте .env.example в .env и заполните его.",
             file=sys.stderr,
         )
