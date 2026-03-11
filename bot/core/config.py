@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     server_endpoint: str = ""
     dns_servers: str = "1.1.1.1, 8.8.8.8"
     vpn_ip_range: str = "10.8.0.0/24"
+    max_profiles_per_user: int = 3
 
     # Параметры обфускации AmneziaWG
     jc: int = 4

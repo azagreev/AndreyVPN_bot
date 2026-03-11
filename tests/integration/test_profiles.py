@@ -184,16 +184,91 @@ async def test_cannot_show_qr_for_other_users_profile(prepared_db, db_connection
 
 async def test_vpn_request_notifies_admin(prepared_db, db_connection, admin_id):
     """handle_vpn_request отправляет уведомление администратору."""
-    from bot.handlers.user.profiles import handle_vpn_request
+    from bot.handlers.user.profiles import handle_vpn_request, _pending_vpn_requests
 
     user_id = 3011
     await create_approved_user(db_connection, user_id, username="requester", full_name="Requester")
 
+    _pending_vpn_requests.clear()
     callback = make_callback(user_id=user_id)
     bot = make_bot()
 
-    await handle_vpn_request(callback, bot)
+    await handle_vpn_request(callback, bot, db_connection)
 
     bot.send_message.assert_called_once()
     call_args = bot.send_message.call_args
     assert call_args[0][0] == admin_id, "Уведомление должно отправляться на admin_id"
+
+
+async def test_vpn_request_blocked_within_ttl(prepared_db, db_connection, admin_id):
+    """Повторный запрос в течение 24ч блокируется."""
+    from bot.handlers.user.profiles import handle_vpn_request, _pending_vpn_requests
+
+    user_id = 3020
+    await create_approved_user(db_connection, user_id, username="ttl_user", full_name="TTL User")
+
+    _pending_vpn_requests.clear()
+    import time
+    _pending_vpn_requests[user_id] = time.time()  # уже есть свежий запрос
+
+    callback = make_callback(user_id=user_id)
+    bot = make_bot()
+
+    await handle_vpn_request(callback, bot, db_connection)
+
+    # Уведомление администратору НЕ должно уйти
+    bot.send_message.assert_not_called()
+    callback.answer.assert_called_once()
+    assert "ожидайте" in callback.answer.call_args[0][0]
+
+
+async def test_vpn_request_allowed_after_ttl_expired(prepared_db, db_connection, admin_id):
+    """Запрос разрешён если предыдущий старше 24ч."""
+    from bot.handlers.user.profiles import handle_vpn_request, _pending_vpn_requests, PENDING_REQUEST_TTL
+
+    user_id = 3021
+    await create_approved_user(db_connection, user_id, username="expired_user", full_name="Expired User")
+
+    _pending_vpn_requests.clear()
+    import time
+    _pending_vpn_requests[user_id] = time.time() - PENDING_REQUEST_TTL - 1  # истёк
+
+    callback = make_callback(user_id=user_id)
+    bot = make_bot()
+
+    await handle_vpn_request(callback, bot, db_connection)
+
+    bot.send_message.assert_called_once()
+    assert bot.send_message.call_args[0][0] == admin_id
+
+
+async def test_vpn_request_blocked_at_profile_limit(prepared_db, db_connection, admin_id, test_settings, monkeypatch):
+    """Запрос блокируется если пользователь достиг лимита профилей."""
+    from bot.handlers.user.profiles import handle_vpn_request, _pending_vpn_requests
+    from bot.core.config import settings
+
+    user_id = 3022
+    await create_approved_user(db_connection, user_id, username="limit_user", full_name="Limit User")
+
+    monkeypatch.setattr(settings, "max_profiles_per_user", 2, raising=False)
+
+    # Вставляем 2 профиля — лимит достигнут
+    for i, (ip, pk) in enumerate([("10.0.0.90", "pk_lim1"), ("10.0.0.91", "pk_lim2")], start=1):
+        await db_connection.execute(
+            "INSERT INTO vpn_profiles (user_id, name, private_key, public_key, ipv4_address) VALUES (?, ?, ?, ?, ?)",
+            (user_id, f"Prof_{i}", "enc_key", pk, ip),
+        )
+    await db_connection.commit()
+
+    _pending_vpn_requests.clear()
+    callback = make_callback(user_id=user_id)
+    bot = make_bot()
+
+    await handle_vpn_request(callback, bot, db_connection)
+
+    bot.send_message.assert_not_called()
+    callback.answer.assert_called_once()
+    assert "лимит" in callback.answer.call_args[0][0]
+
+    # TTL запись должна быть сброшена — пользователь может попробовать снова после удаления профиля
+    assert user_id not in _pending_vpn_requests

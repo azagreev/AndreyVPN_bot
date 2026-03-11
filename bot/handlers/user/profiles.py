@@ -1,4 +1,5 @@
 import html
+import time
 
 from aiogram import Router, F, Bot
 from aiogram.types import (
@@ -22,7 +23,8 @@ from bot.handlers.admin.users import get_issue_vpn_keyboard
 router = Router()
 
 # Rate limiting: предотвращаем многократный спам запросами VPN
-_pending_vpn_requests: set[int] = set()
+_pending_vpn_requests: dict[int, float] = {}
+PENDING_REQUEST_TTL = 86400  # 24 часа
 
 
 class ProfileAction(CallbackData, prefix="prof"):
@@ -193,14 +195,27 @@ async def handle_delete_cancel(callback: CallbackQuery, callback_data: ProfileAc
 
 
 @router.callback_query(ProfileAction.filter(F.action == "request"))
-async def handle_vpn_request(callback: CallbackQuery, bot: Bot):
+async def handle_vpn_request(callback: CallbackQuery, bot: Bot, db: aiosqlite.Connection):
     user = callback.from_user
 
     user_id = user.id
-    if user_id in _pending_vpn_requests:
+    now = time.time()
+    last_request = _pending_vpn_requests.get(user_id)
+    if last_request is not None and now - last_request < PENDING_REQUEST_TTL:
         await callback.answer("⏳ Запрос уже отправлен, ожидайте ответа администратора.", show_alert=True)
         return
-    _pending_vpn_requests.add(user_id)
+    _pending_vpn_requests[user_id] = now
+
+    # check profile limit
+    profile_count = await repository.count_user_profiles(db, user_id)
+    if profile_count >= settings.max_profiles_per_user:
+        _pending_vpn_requests.pop(user_id, None)  # сбрасываем TTL — запрос не отправлен
+        await callback.answer(
+            f"❌ Достигнут лимит профилей ({settings.max_profiles_per_user} шт.). "
+            "Удалите один из существующих профилей.",
+            show_alert=True,
+        )
+        return
 
     username = f"@{user.username}" if user.username else "без username"
     logger.info("[VPN] Пользователь запросил профиль | user_id={} username={}", user.id, username)

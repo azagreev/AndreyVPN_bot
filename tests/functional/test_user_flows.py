@@ -146,7 +146,7 @@ async def test_full_profile_lifecycle(prepared_db, db_connection, admin_id):
 
     # Шаг 2: Запрос VPN — уведомление admin
     callback_req = make_callback(user_id=user_id)
-    await handle_vpn_request(callback_req, bot)
+    await handle_vpn_request(callback_req, bot, db_connection)
     bot.send_message.assert_called_once()
     assert bot.send_message.call_args[0][0] == admin_id, "Уведомление должно быть отправлено admin"
 

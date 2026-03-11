@@ -7,6 +7,12 @@ Versioning: [Semantic Versioning](https://semver.org/)
 ## [Unreleased]
 
 ## [1.2.0] - 2026-03-12
+### Added
+- Лимит VPN профилей на пользователя: `MAX_PROFILES_PER_USER` (по умолч. 3). Проверка на стороне пользователя (при запросе) и на стороне администратора (при выдаче)
+- TTL 24ч для `_pending_vpn_requests`: после истечения пользователь может повторно запросить профиль без участия администратора. При достижении лимита профилей TTL не устанавливается
+- Валидация конфигурации WireGuard при старте: `VPN_IP_RANGE` (корректный CIDR с ≥2 хостами), `SERVER_PUB_KEY` (непустой), `SERVER_ENDPOINT` (формат host:port) — бот падает с CRITICAL и понятным сообщением
+- Redis поддержка: `redis>=5.0.0` добавлен в зависимости; `docker-compose.yml` содержит закомментированный Redis сервис с инструкцией
+
 ### Fixed
 - `create_profile`: профиль больше не сохраняется в БД если синхронизация с WireGuard провалилась — поднимается `RuntimeError`, транзакция откатывается
 - `delete_profile`: профиль больше не удаляется из БД если peer не был удалён с WG-сервера (возвращает `False` вместо `True`)
@@ -14,11 +20,17 @@ Versioning: [Semantic Versioning](https://semver.org/)
 - Хендлеры `.conf` и `QR`: при `get_profile_config == None` теперь показывают пользователю сообщение об ошибке вместо молчаливого возврата
 - `Dockerfile`: убрана строка `COPY .env .` — секреты больше не попадают в слои образа; переменные передаются через `environment` в docker-compose
 - `main.py`: проверка `.env` при старте теперь пропускается если переменные окружения уже заданы (Docker-сценарий)
+- Исправлен AttributeError в `approvals.py`: `_pending_vpn_requests.discard()` заменён на `.pop(user_id, None)` после смены типа с set на dict
 
 ### Tests
-- Добавлен `test_create_profile_raises_when_sync_fails` — WG недоступен → профиль не создаётся в БД
-- Добавлен `test_delete_profile_server_removal_fails` — ошибка WG → `False`, `delete_vpn_profile` не вызывается
-- Добавлен `test_get_profile_config_decrypt_failure_returns_none` — повреждённый ключ → `None` без исключения
+- `test_create_profile_raises_when_sync_fails` — WG недоступен → профиль не создаётся в БД
+- `test_delete_profile_server_removal_fails` — ошибка WG → `False`, `delete_vpn_profile` не вызывается
+- `test_get_profile_config_decrypt_failure_returns_none` — повреждённый ключ → `None` без исключения
+- `test_vpn_request_blocked_within_ttl` — повторный запрос в течение 24ч заблокирован
+- `test_vpn_request_allowed_after_ttl_expired` — после истечения TTL запрос проходит
+- `test_vpn_request_blocked_at_profile_limit` — при лимите профилей запрос заблокирован, TTL не устанавливается
+- `test_startup_validation_invalid_cidr/too_small_cidr/empty_server_fields` — документируют правила валидации конфигурации
+- Итого: **165 тестов** (было 159)
 
 ## [1.1.0] - 2026-03-12
 ### Added

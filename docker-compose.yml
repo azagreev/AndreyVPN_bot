@@ -41,6 +41,8 @@ services:
       - H2=${H2:-87654321}
       - H3=${H3:-13572468}
       - H4=${H4:-24681357}
+      # Redis для FSM Storage (раскомментируй если используешь Redis)
+      # - REDIS_URL=redis://redis:6379/0
 
     volumes:
       # Постоянное хранение БД и логов
@@ -71,9 +73,20 @@ services:
     networks:
       - vpn_network
 
+  # Redis для FSM Storage (раскомментируй для production)
+  # redis:
+  #   image: redis:7-alpine
+  #   container_name: andreyvpn_redis
+  #   restart: unless-stopped
+  #   volumes:
+  #     - redis_data:/data
+  #   networks:
+  #     - vpn_network
+
 volumes:
   bot_data:
   bot_logs:
+  # redis_data:  # раскомментируй вместе с Redis сервисом
 
 networks:
   vpn_network:

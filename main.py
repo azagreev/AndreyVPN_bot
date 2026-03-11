@@ -1,5 +1,7 @@
 import asyncio
+import ipaddress
 import os
+import re
 import sys
 
 import aiosqlite
@@ -39,6 +41,23 @@ def main() -> None:
 
     if not settings.encryption_key:
         logger.critical("[STARTUP] ENCRYPTION_KEY не задан — приватные ключи WireGuard не будут зашифрованы")
+        sys.exit(1)
+
+    # Валидация конфигурации WireGuard при старте
+    try:
+        _network = ipaddress.IPv4Network(settings.vpn_ip_range, strict=False)
+        if max(_network.num_addresses - 2, 0) < 2:
+            raise ValueError("слишком маленький диапазон")
+    except ValueError as e:
+        logger.critical("[STARTUP] Некорректный VPN_IP_RANGE='{}': {}", settings.vpn_ip_range, e)
+        sys.exit(1)
+
+    if not settings.server_pub_key.strip():
+        logger.critical("[STARTUP] SERVER_PUB_KEY не задан — невозможно генерировать VPN конфиги")
+        sys.exit(1)
+
+    if not settings.server_endpoint.strip() or ":" not in settings.server_endpoint:
+        logger.critical("[STARTUP] SERVER_ENDPOINT не задан или некорректен (ожидается host:port), текущее значение='{}'", settings.server_endpoint)
         sys.exit(1)
 
     # FSM Storage

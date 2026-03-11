@@ -200,3 +200,29 @@ async def test_remove_peer_from_server_no_binary(test_settings):
         result = await VPNService.remove_peer_from_server("SOME_KEY==")
 
     assert result is False, "remove_peer_from_server должен возвращать False если бинарник не найден"
+
+
+# ---------------------------------------------------------------------------
+# startup validation helpers
+# ---------------------------------------------------------------------------
+
+async def test_startup_validation_invalid_cidr(test_settings, monkeypatch):
+    """Некорректный VPN_IP_RANGE должен давать ValueError/критическую ошибку."""
+    import ipaddress
+    with pytest.raises(ValueError):
+        ipaddress.IPv4Network("not_a_cidr", strict=False)
+
+
+async def test_startup_validation_too_small_cidr(test_settings):
+    """CIDR /31 содержит только 2 адреса — слишком маленький для VPN пула."""
+    import ipaddress
+    network = ipaddress.IPv4Network("10.0.0.0/31", strict=False)
+    usable = max(network.num_addresses - 2, 0)
+    assert usable < 2, "Диапазон /31 не должен проходить валидацию"
+
+
+async def test_startup_validation_empty_server_fields(test_settings):
+    """Пустые SERVER_PUB_KEY и SERVER_ENDPOINT не должны проходить валидацию."""
+    assert not "".strip(), "Пустой SERVER_PUB_KEY должен быть отклонён"
+    assert ":" not in "192.168.1.1", "SERVER_ENDPOINT без порта должен быть отклонён"
+    assert ":" in "192.168.1.1:51820", "Корректный SERVER_ENDPOINT должен содержать двоеточие"

@@ -109,7 +109,7 @@ async def handle_approve(callback: CallbackQuery, callback_data: ApprovalAction,
 
     # Очищаем pending VPN requests для этого пользователя
     from bot.handlers.user.profiles import _pending_vpn_requests
-    _pending_vpn_requests.discard(user_id)
+    _pending_vpn_requests.pop(user_id, None)
 
     await callback.answer("✅ Пользователь одобрен!")
     await callback.message.edit_text(callback.message.text + "\n\n✅ <b>Одобрено.</b>")
@@ -137,7 +137,7 @@ async def handle_reject(callback: CallbackQuery, callback_data: ApprovalAction, 
 
     # Очищаем pending VPN requests для этого пользователя
     from bot.handlers.user.profiles import _pending_vpn_requests
-    _pending_vpn_requests.discard(user_id)
+    _pending_vpn_requests.pop(user_id, None)
 
     await callback.answer("❌ Заявка отклонена.")
     await callback.message.edit_text(callback.message.text + "\n\n❌ <b>Отклонено.</b>")

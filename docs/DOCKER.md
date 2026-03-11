@@ -110,6 +110,8 @@ docker cp andreyvpn_bot:/app/data/bot_data.db ./backup_$(date +%Y%m%d).db
 | `LOG_PATH` | нет | Директория логов (по умолч. `/app/logs`) |
 | `LOG_LEVEL` | нет | `DEBUG`/`INFO`/`WARNING`/`ERROR` |
 | `VPN_IP_RANGE` | нет | CIDR пул адресов |
+| `MAX_PROFILES_PER_USER` | нет | Лимит профилей на пользователя (по умолч. `3`) |
+| `REDIS_URL` | нет | URL Redis для FSM storage (напр. `redis://redis:6379/0`) |
 
 ### 7. DNS-proxy (AdGuard DNS фильтрация)
 
@@ -148,4 +150,26 @@ docker compose exec bot tail -50 /app/logs/errors.log
 
 # Журнал безопасности
 docker compose exec bot tail -100 /app/logs/audit.log
+```
+
+### 9. Redis (FSM Storage)
+
+По умолчанию FSM-состояния (капча регистрации) хранятся в памяти и теряются при рестарте бота.
+
+Для production рекомендуется Redis. Раскомментируй в `docker-compose.yml`:
+
+```yaml
+  redis:
+    image: redis:7-alpine
+    container_name: andreyvpn_redis
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    networks:
+      - vpn_network
+```
+
+И добавь в `.env`:
+```env
+REDIS_URL=redis://redis:6379/0
 ```

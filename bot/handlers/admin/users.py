@@ -218,7 +218,7 @@ async def handle_vpn_reject(callback: CallbackQuery, callback_data: IssueVPN, bo
 
     # Очищаем pending VPN requests для этого пользователя
     from bot.handlers.user.profiles import _pending_vpn_requests
-    _pending_vpn_requests.discard(user_id)
+    _pending_vpn_requests.pop(user_id, None)
 
     try:
         await bot.send_message(user_id, "❌ Ваш запрос на VPN профиль был отклонён.")
@@ -230,6 +230,11 @@ async def _issue_vpn_to_user(callback: CallbackQuery, user_id: int, db: aiosqlit
     admin_id = callback.from_user.id
     try:
         cnt = await repository.count_user_profiles(db, user_id)
+        if cnt >= settings.max_profiles_per_user:
+            await callback.message.answer(
+                f"❌ Пользователь уже имеет максимальное количество профилей ({settings.max_profiles_per_user} шт.)."
+            )
+            return
         profile_name = f"VPN_{user_id}_{cnt + 1}"
 
         logger.info("[VPN] Создание профиля | user_id={} profile={} by_admin={}", user_id, profile_name, admin_id)
@@ -239,7 +244,7 @@ async def _issue_vpn_to_user(callback: CallbackQuery, user_id: int, db: aiosqlit
 
         # Очищаем pending VPN requests для этого пользователя
         from bot.handlers.user.profiles import _pending_vpn_requests
-        _pending_vpn_requests.discard(user_id)
+        _pending_vpn_requests.pop(user_id, None)
 
         qr_bytes = VPNService.generate_qr_code(result["config"])
         qr_file = BufferedInputFile(qr_bytes, filename=f"{profile_name}.png")

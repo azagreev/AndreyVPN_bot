@@ -14,5 +14,8 @@ pytest-mock>=3.12.0
 ruff>=0.6.0
 mypy>=1.11.0
 
+# Redis (опционально — для FSM storage в production, требует REDIS_URL в .env)
+redis>=5.0.0
+
 # Docker (опционально, для docker exec режима)
 # docker пакет не нужен — используем subprocess docker exec
