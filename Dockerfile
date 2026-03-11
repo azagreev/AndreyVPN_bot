@@ -3,6 +3,8 @@ FROM python:3.12-slim AS builder
 
 WORKDIR /app
 
+ARG BOT_VERSION=dev
+
 # Системные зависимости для сборки
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
@@ -15,6 +17,11 @@ RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
 FROM python:3.12-slim
 
 WORKDIR /app
+
+ARG BOT_VERSION=dev
+LABEL org.opencontainers.image.title="AndreyVPN_bot"
+LABEL org.opencontainers.image.version=$BOT_VERSION
+LABEL org.opencontainers.image.description="Telegram bot for AmneziaWG VPN management"
 
 # Docker CLI для docker exec в AWG контейнер (если используется WG_CONTAINER_NAME)
 RUN apt-get update && apt-get install -y --no-install-recommends \

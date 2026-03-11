@@ -218,20 +218,3 @@ async def get_global_stats(db: aiosqlite.Connection) -> aiosqlite.Row:
     return await cursor.fetchone()
 
 
-# ── Schema version ─────────────────────────────────────────────────────────────
-
-async def get_schema_version(db: aiosqlite.Connection) -> int:
-    try:
-        cursor = await db.execute("SELECT value FROM configs WHERE key = 'schema_version'")
-        row = await cursor.fetchone()
-        return int(row["value"]) if row else 0
-    except Exception:
-        return 0
-
-
-async def set_schema_version(db: aiosqlite.Connection, version: int) -> None:
-    await db.execute(
-        "INSERT OR REPLACE INTO configs (key, value) VALUES ('schema_version', ?)",
-        (str(version),),
-    )
-    await db.commit()

@@ -15,3 +15,35 @@ env/
 # IDE
 .vscode/
 .idea/
+
+# Бэкапы БД (создаются скриптом обновления)
+backups/*.db
+backups/*.db-wal
+backups/*.db-shm
+
+# Бэкапы миграций (создаются MigrationRunner)
+*.bak_*.db
+
+# Среда
+.env
+venv/
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Логи
+logs/
+*.log
+
+# БД
+*.db
+*.db-wal
+*.db-shm
+
+# IDE
+.idea/
+.vscode/

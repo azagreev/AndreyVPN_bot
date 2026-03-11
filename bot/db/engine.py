@@ -1,30 +1,35 @@
 import aiosqlite
 from loguru import logger
-from bot.db.models import ALL_TABLES
-from bot.db.repository import get_schema_version, set_schema_version
 
-CURRENT_SCHEMA_VERSION = 1
+from bot.db.migrator import MigrationRunner
 
 
 async def init_db(db_path: str) -> None:
+    """
+    Инициализирует базу данных и применяет все pending-миграции.
+
+    Порядок:
+      1. PRAGMA journal_mode = WAL  (concurrent reads)
+      2. PRAGMA foreign_keys = ON   (referential integrity)
+      3. MigrationRunner.run_pending() — создаёт таблицы и накатывает схему
+    """
     try:
         async with aiosqlite.connect(db_path) as db:
             db.row_factory = aiosqlite.Row
-            await db.execute("PRAGMA foreign_keys = ON")
             await db.execute("PRAGMA journal_mode = WAL")
-            logger.info(f"Подключение к базе данных по пути: {db_path}")
+            await db.execute("PRAGMA foreign_keys = ON")
 
-            for table_query in ALL_TABLES:
-                await db.execute(table_query)
-            await db.commit()
+            runner = MigrationRunner(db_path)
+            applied = await runner.run_pending(db)
 
-            version = await get_schema_version(db)
-            if version < CURRENT_SCHEMA_VERSION:
-                await set_schema_version(db, CURRENT_SCHEMA_VERSION)
-                logger.info(f"[STARTUP] Схема БД обновлена до версии {CURRENT_SCHEMA_VERSION}")
+            if applied == 0:
+                logger.info("[STARTUP] База данных актуальна | path={}", db_path)
+            else:
+                logger.info(
+                    "[STARTUP] База данных обновлена | path={} migrations={}",
+                    db_path, applied,
+                )
 
-            logger.success("Инициализация базы данных успешно завершена. Все таблицы созданы.")
-
-    except Exception as e:
-        logger.error(f"Ошибка при инициализации базы данных: {e}")
+    except Exception as exc:
+        logger.error("Ошибка при инициализации базы данных: {}", exc)
         raise

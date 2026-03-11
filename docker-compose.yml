@@ -5,8 +5,17 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        BOT_VERSION: ${BOT_VERSION:-dev}
     container_name: andreyvpn_bot
     restart: unless-stopped
+    stop_grace_period: 30s
+    healthcheck:
+      test: ["CMD", "python", "-c", "import sys; open('/app/data/bot_data.db'); sys.exit(0)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
 
     environment:
       # Переменные можно задать здесь или через .env файл
