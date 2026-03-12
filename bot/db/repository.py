@@ -202,6 +202,14 @@ async def get_monthly_usage_rows(
     return await cursor.fetchall()
 
 
+async def get_all_active_profiles(db: aiosqlite.Connection) -> list[aiosqlite.Row]:
+    """All profiles with public_key and ipv4 — used for peer recovery on startup."""
+    cursor = await db.execute(
+        "SELECT public_key, ipv4_address FROM vpn_profiles"
+    )
+    return await cursor.fetchall()
+
+
 # ── Statistics ─────────────────────────────────────────────────────────────────
 
 async def get_global_stats(db: aiosqlite.Connection) -> aiosqlite.Row:

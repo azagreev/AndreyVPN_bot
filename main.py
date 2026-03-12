@@ -52,8 +52,12 @@ def main() -> None:
         logger.critical("[STARTUP] Некорректный VPN_IP_RANGE='{}': {}", settings.vpn_ip_range, e)
         sys.exit(1)
 
-    if not settings.server_pub_key.strip():
+    pub_key = settings.server_pub_key.strip()
+    if not pub_key:
         logger.critical("[STARTUP] SERVER_PUB_KEY не задан — невозможно генерировать VPN конфиги")
+        sys.exit(1)
+    if not re.match(r'^[A-Za-z0-9+/]{43}=$', pub_key):
+        logger.critical("[STARTUP] SERVER_PUB_KEY неверный формат (ожидается 44-символьный base64)")
         sys.exit(1)
 
     if not settings.server_endpoint.strip() or ":" not in settings.server_endpoint:
@@ -98,6 +102,38 @@ def main() -> None:
         await db.execute("PRAGMA foreign_keys = ON")
         await db.execute("PRAGMA journal_mode = WAL")
         dp["db"] = db
+
+        # Восстановление пиров из БД
+        from bot.services.vpn_service import VPNService
+        try:
+            ok, fail = await VPNService.recover_all_peers(db)
+            if ok or fail:
+                logger.info("[STARTUP] Peer recovery: {} synced, {} failed", ok, fail)
+        except Exception as e:
+            logger.warning("[STARTUP] Peer recovery skipped: {}", e)
+
+        # Проверка SERVER_PUB_KEY на соответствие серверу
+        try:
+            status = await VPNService.get_server_status()
+            if status["status"] == "online":
+                binary = VPNService._resolve_wg_binary()
+                args = VPNService._build_command(binary, "show", settings.wg_interface, "public-key")
+                proc = await asyncio.create_subprocess_exec(
+                    *args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+                )
+                stdout, _ = await proc.communicate()
+                if proc.returncode == 0:
+                    actual_key = stdout.decode().strip()
+                    if actual_key != settings.server_pub_key.strip():
+                        logger.warning(
+                            "[STARTUP] SERVER_PUB_KEY MISMATCH! .env={:.8}... actual={:.8}... "
+                            "— clients will fail to connect!",
+                            settings.server_pub_key, actual_key,
+                        )
+                    else:
+                        logger.info("[STARTUP] SERVER_PUB_KEY verified OK")
+        except Exception:
+            logger.debug("[STARTUP] Could not verify server public key")
 
         # Регистрируем middlewares с готовым соединением
         dp.update.outer_middleware(DbMiddleware(db))

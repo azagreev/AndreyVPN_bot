@@ -74,7 +74,13 @@ class VPNService:
 
     @staticmethod
     def _resolve_wg_binary() -> str:
-        """Находит бинарник awg или wg в PATH."""
+        """Находит бинарник awg или wg.
+
+        В Docker-режиме (WG_CONTAINER_NAME задан) бинарник находится внутри
+        целевого контейнера — локальный поиск не нужен, возвращаем bare-имя.
+        """
+        if settings.wg_container_name.strip():
+            return "awg"
         awg_binary = shutil.which("awg")
         if awg_binary:
             return awg_binary
@@ -83,17 +89,32 @@ class VPNService:
             return wg_binary
         raise RuntimeError("Utilities 'awg' or 'wg' are not installed or not in PATH.")
 
+    @staticmethod
+    def _resolve_wg_quick_binary() -> str:
+        """Находит бинарник awg-quick или wg-quick для сохранения конфигурации."""
+        if settings.wg_container_name.strip():
+            return "awg-quick"
+        for name in ("awg-quick", "wg-quick"):
+            path = shutil.which(name)
+            if path:
+                return path
+        raise RuntimeError("Utilities 'awg-quick' or 'wg-quick' are not installed or not in PATH.")
+
     @classmethod
-    def _build_command(cls, *args: str) -> list[str]:
-        """
-        Строит команду для выполнения.
+    def _build_command(cls, *args: str, interactive: bool = False) -> list[str]:
+        """Строит команду для выполнения.
+
         Если WG_CONTAINER_NAME задан — оборачивает в docker exec.
-        Иначе вызывает напрямую.
+        Флаг ``interactive=True`` добавляет ``-i`` для команд, читающих stdin
+        (например, ``awg pubkey``).
         """
         cmd = list(args)
         container = settings.wg_container_name.strip()
         if container:
-            return ["docker", "exec", container] + cmd
+            docker_cmd = ["docker", "exec"]
+            if interactive:
+                docker_cmd.append("-i")
+            return docker_cmd + [container] + cmd
         return cmd
 
     @classmethod
@@ -116,7 +137,7 @@ class VPNService:
         if not private_key:
             raise RuntimeError("Generated private key is empty.")
 
-        pubkey_cmd = cls._build_command(binary, "pubkey")
+        pubkey_cmd = cls._build_command(binary, "pubkey", interactive=True)
         log_wg_command(pubkey_cmd)
         process_pubkey = await asyncio.create_subprocess_exec(
             *pubkey_cmd,
@@ -228,32 +249,71 @@ class VPNService:
             if process.returncode != 0:
                 logger.error(f"Sync error: {err}")
                 return False
+            # Persist to config file so peers survive container restart
+            saved = await cls.save_interface_config()
+            if not saved:
+                logger.warning("[WG] Peer synced to runtime but config save failed")
             return True
         except OSError as exc:
             logger.error(f"Sync error: {exc}")
             return False
 
     @classmethod
-    def generate_config_content(cls, private_key: str, ipv4: str) -> str:
-        return f"""[Interface]
-PrivateKey = {private_key}
-Address = {ipv4}/32
-DNS = {settings.dns_servers}
-Jc = {settings.jc}
-Jmin = {settings.jmin}
-Jmax = {settings.jmax}
-S1 = {settings.s1}
-S2 = {settings.s2}
-H1 = {settings.h1}
-H2 = {settings.h2}
-H3 = {settings.h3}
-H4 = {settings.h4}
+    async def save_interface_config(cls) -> bool:
+        """Сохраняет текущее runtime-состояние WG интерфейса на диск через awg-quick save."""
+        try:
+            binary_quick = cls._resolve_wg_quick_binary()
+        except RuntimeError as exc:
+            logger.error(str(exc))
+            return False
+        args = cls._build_command(binary_quick, "save", settings.wg_interface)
+        log_wg_command(args)
+        try:
+            process = await asyncio.create_subprocess_exec(
+                *args, stderr=asyncio.subprocess.PIPE,
+            )
+            _, stderr = await process.communicate()
+            err = stderr.decode("utf-8", errors="replace").strip()
+            log_wg_result(process.returncode, err)
+            if process.returncode != 0:
+                logger.error("[WG] Failed to save interface config: {}", err)
+                return False
+            return True
+        except OSError as exc:
+            logger.error("[WG] Failed to save interface config: {}", exc)
+            return False
 
-[Peer]
-PublicKey = {settings.server_pub_key}
-Endpoint = {settings.server_endpoint}
-AllowedIPs = 0.0.0.0/0
-"""
+    @classmethod
+    def generate_config_content(cls, private_key: str, ipv4: str) -> str:
+        lines = [
+            "[Interface]",
+            f"PrivateKey = {private_key}",
+            f"Address = {ipv4}/32",
+            f"DNS = {settings.dns_servers}",
+            f"Jc = {settings.jc}",
+            f"Jmin = {settings.jmin}",
+            f"Jmax = {settings.jmax}",
+            f"S1 = {settings.s1}",
+            f"S2 = {settings.s2}",
+        ]
+        if settings.s3:
+            lines.append(f"S3 = {settings.s3}")
+        if settings.s4:
+            lines.append(f"S4 = {settings.s4}")
+        if settings.i1:
+            lines.append(f"I1 = {settings.i1}")
+        lines.extend([
+            f"H1 = {settings.h1}",
+            f"H2 = {settings.h2}",
+            f"H3 = {settings.h3}",
+            f"H4 = {settings.h4}",
+            "",
+            "[Peer]",
+            f"PublicKey = {settings.server_pub_key}",
+            f"Endpoint = {settings.server_endpoint}",
+            "AllowedIPs = 0.0.0.0/0",
+        ])
+        return "\n".join(lines) + "\n"
 
     @staticmethod
     def generate_qr_code(config: str) -> bytes:
@@ -353,6 +413,7 @@ AllowedIPs = 0.0.0.0/0
             if process.returncode != 0:
                 logger.error(f"Failed to remove peer: {err}")
                 return False
+            await cls.save_interface_config()
             return True
         except OSError as exc:
             logger.error(f"Failed to remove peer: {exc}")
@@ -390,6 +451,52 @@ AllowedIPs = 0.0.0.0/0
             return None
         config = cls.generate_config_content(private_key, ipv4)
         return {"name": name, "config": config, "ipv4": ipv4}
+
+    @classmethod
+    async def recover_all_peers(cls, db: aiosqlite.Connection) -> tuple[int, int]:
+        """Восстанавливает все пиры из БД на WG-сервер при старте.
+
+        Возвращает (success_count, fail_count). Вызывает ``save_interface_config``
+        один раз в конце, а не после каждого peer.
+        """
+        profiles = await repository.get_all_active_profiles(db)
+        if not profiles:
+            return (0, 0)
+
+        try:
+            binary = cls._resolve_wg_binary()
+        except RuntimeError as exc:
+            logger.error("[RECOVERY] {}", exc)
+            return (0, len(profiles))
+
+        success, failed = 0, 0
+        for p in profiles:
+            args = cls._build_command(
+                binary, "set", settings.wg_interface,
+                "peer", p["public_key"], "allowed-ips", f"{p['ipv4_address']}/32",
+            )
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    *args, stderr=asyncio.subprocess.PIPE,
+                )
+                _, stderr = await proc.communicate()
+                if proc.returncode == 0:
+                    success += 1
+                else:
+                    logger.warning(
+                        "[RECOVERY] peer {}...: {}",
+                        p["public_key"][:8],
+                        stderr.decode(errors="replace").strip(),
+                    )
+                    failed += 1
+            except OSError as exc:
+                logger.warning("[RECOVERY] peer {}...: {}", p["public_key"][:8], exc)
+                failed += 1
+
+        if success > 0:
+            await cls.save_interface_config()
+
+        return (success, failed)
 
     @classmethod
     async def get_all_peers_stats(cls) -> dict[str, dict[str, int]]:
