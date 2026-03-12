@@ -38,8 +38,13 @@ COPY main.py .
 # Данные и логи — volume
 VOLUME ["/app/data", "/app/logs"]
 
-# Пользователь без root-прав (кроме docker socket доступа)
-RUN groupadd -r botuser && useradd -r -g botuser botuser
+# Пользователь без root-прав с доступом к Docker socket
+# DOCKER_GID должен совпадать с GID группы docker на хосте
+# Узнать: stat -c '%g' /var/run/docker.sock
+ARG DOCKER_GID=999
+RUN groupadd -r botuser && useradd -r -g botuser botuser \
+    && (groupadd -g ${DOCKER_GID} dockerhost 2>/dev/null || true) \
+    && usermod -aG dockerhost botuser
 RUN chown -R botuser:botuser /app
 USER botuser
 

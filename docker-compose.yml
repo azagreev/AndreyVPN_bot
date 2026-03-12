@@ -7,6 +7,7 @@ services:
       dockerfile: Dockerfile
       args:
         BOT_VERSION: ${BOT_VERSION:-dev}
+        DOCKER_GID: ${DOCKER_GID:-999}
     container_name: andreyvpn_bot
     restart: unless-stopped
     stop_grace_period: 30s
@@ -37,6 +38,10 @@ services:
       - JMAX=${JMAX:-70}
       - S1=${S1:-44}
       - S2=${S2:-148}
+      # Дополнительные параметры обфускации (0 = не используется)
+      - S3=${S3:-0}
+      - S4=${S4:-0}
+      - I1=${I1:-0}
       - H1=${H1:-12345678}
       - H2=${H2:-87654321}
       - H3=${H3:-13572468}

@@ -42,6 +42,7 @@ def test_settings(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, fernet_key: s
     monkeypatch.setattr(settings, "server_pub_key", "test_server_public_key", raising=False)
     monkeypatch.setattr(settings, "server_endpoint", "198.51.100.10:51820", raising=False)
     monkeypatch.setattr(settings, "dns_servers", "1.1.1.1, 8.8.8.8", raising=False)
+    monkeypatch.setattr(settings, "wg_container_name", "", raising=False)
     return db_path
 
 
