@@ -42,10 +42,27 @@ WG_CONTAINER_NAME=amneziawg   # имя вашего AWG контейнера
 python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 ```
 
-### 2. Сборка и запуск
+### 2. Docker socket permissions
+
+Бот вызывает `docker exec` для управления AWG-контейнером. Для этого `botuser` внутри контейнера должен иметь доступ к `/var/run/docker.sock`.
 
 ```bash
-# Сборка образа
+# Узнать GID группы docker на хосте
+stat -c '%g' /var/run/docker.sock
+# Пример вывода: 999
+```
+
+Указать в `.env`:
+```env
+DOCKER_GID=999   # замените на ваш GID
+```
+
+При сборке образа GID передаётся как build arg — `botuser` добавляется в группу `dockerhost` с этим GID.
+
+### 3. Сборка и запуск
+
+```bash
+# Сборка образа (DOCKER_GID подхватывается из .env)
 docker compose build
 
 # Запуск
@@ -111,9 +128,26 @@ docker cp andreyvpn_bot:/app/data/bot_data.db ./backup_$(date +%Y%m%d).db
 | `LOG_LEVEL` | нет | `DEBUG`/`INFO`/`WARNING`/`ERROR` |
 | `VPN_IP_RANGE` | нет | CIDR пул адресов |
 | `MAX_PROFILES_PER_USER` | нет | Лимит профилей на пользователя (по умолч. `3`) |
+| `S3`, `S4`, `I1` | нет | Дополнительные параметры обфускации AmneziaWG (по умолч. `0` — не включаются в конфиг) |
+| `DOCKER_GID` | нет | GID группы docker на хосте (по умолч. `999`). Узнать: `stat -c '%g' /var/run/docker.sock` |
 | `REDIS_URL` | нет | URL Redis для FSM storage (напр. `redis://redis:6379/0`) |
 
-### 7. DNS-proxy (AdGuard DNS фильтрация)
+### 7. Peer persistence и recovery
+
+Бот автоматически сохраняет конфигурацию WireGuard на диск (`awg-quick save`) после каждого добавления или удаления peer. Это гарантирует, что пиры не теряются при рестарте AWG-контейнера.
+
+При старте бота выполняется **peer recovery**: все профили из БД пересинхронизируются на WG-сервер. В логах:
+```
+[STARTUP] Peer recovery: 5 synced, 0 failed
+[STARTUP] SERVER_PUB_KEY verified OK
+```
+
+Если `SERVER_PUB_KEY` в `.env` не совпадает с реальным ключом интерфейса, бот выведет предупреждение:
+```
+[STARTUP] SERVER_PUB_KEY MISMATCH! .env=ABCDEFGH... actual=XYZWVUTS... — clients will fail to connect!
+```
+
+### 8. DNS-proxy (AdGuard DNS фильтрация)
 
 Если рядом с AWG запущен `adguard-dnsproxy` в `container:` network mode
 (разделяет сеть с AWG-контейнером), клиенты могут получить фильтрацию через AdGuard DNS.
@@ -131,7 +165,7 @@ DNS_SERVERS=10.8.1.254   # замените на ваш Address без /24
 
 Подробнее: [docs/DNS_PROXY.md](DNS_PROXY.md)
 
-### 8. Обновление бота
+### 9. Обновление бота
 
 ```bash
 git pull
@@ -139,7 +173,7 @@ docker compose build --no-cache
 docker compose up -d
 ```
 
-### 8. Мониторинг
+### 10. Мониторинг
 
 ```bash
 # Статус контейнера
@@ -152,7 +186,7 @@ docker compose exec bot tail -50 /app/logs/errors.log
 docker compose exec bot tail -100 /app/logs/audit.log
 ```
 
-### 9. Redis (FSM Storage)
+### 11. Redis (FSM Storage)
 
 По умолчанию FSM-состояния (капча регистрации) хранятся в памяти и теряются при рестарте бота.
 

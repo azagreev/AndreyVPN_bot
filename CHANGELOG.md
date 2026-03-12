@@ -6,6 +6,27 @@ Versioning: [Semantic Versioning](https://semver.org/)
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-03-12
+### Fixed (Incident: полная деградация VPN-сервиса после рестарта)
+- **Docker binary resolution:** `_resolve_wg_binary()` теперь возвращает bare `"awg"` в Docker-режиме (`WG_CONTAINER_NAME` задан) вместо поиска бинарника на хосте через `shutil.which`
+- **Docker exec stdin:** `_build_command()` поддерживает флаг `interactive=True`, добавляющий `-i` к `docker exec` для команд, читающих stdin (`awg pubkey`)
+- **Docker socket permissions:** `Dockerfile` принимает `DOCKER_GID` build arg и создаёт группу `dockerhost` для доступа к `/var/run/docker.sock`
+- **Peer persistence:** новый метод `save_interface_config()` сохраняет runtime-состояние WG через `awg-quick save` после каждого `sync_peer_with_server()` и `remove_peer_from_server()` — пиры больше не теряются при рестарте контейнера
+- **Peer recovery on startup:** `recover_all_peers()` при старте бота пересинхронизирует все профили из БД на WG-сервер с одним вызовом `awg-quick save` в конце
+- **SERVER_PUB_KEY validation:** формат ключа проверяется как base64 (44 символа) при старте; при запуске выполняется runtime-сверка с `awg show <interface> public-key` — несоответствие логируется как WARNING
+
+### Added
+- Параметры обфускации `S3`, `S4`, `I1` (AmneziaWG extensions) — условно включаются в клиентский конфиг когда значение ≠ 0
+- `_resolve_wg_quick_binary()` для команд `awg-quick` / `wg-quick`
+- `get_all_active_profiles()` в `repository.py` — для peer recovery при старте
+- `DOCKER_GID` в `.env.example` и `docker-compose.yml`
+- `S3`, `S4`, `I1` в `.env.example` и `docker-compose.yml`
+
+### Tests
+- 19 новых тестов в `tests/test_incident_fixes.py`: Docker-mode binary resolution, `-i` flag, S3/S4/I1 config, `save_interface_config`, `recover_all_peers`, SERVER_PUB_KEY format
+- `conftest.py`: `wg_container_name=""` в `test_settings` для обратной совместимости
+- Итого: **183 теста** (было 165)
+
 ## [1.2.0] - 2026-03-12
 ### Added
 - Лимит VPN профилей на пользователя: `MAX_PROFILES_PER_USER` (по умолч. 3). Проверка на стороне пользователя (при запросе) и на стороне администратора (при выдаче)
